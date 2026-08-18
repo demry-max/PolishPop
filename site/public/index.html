@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PolishPop — Polish any selected text on macOS</title>
-<meta name="description" content="A macOS menu-bar app that rewrites the text you selected, in any app. Word-level diff, six use cases, five tones, English and 简体中文.">
+<meta name="description" content="Free macOS menu-bar app that rewrites the text you selected, in any app. Signs in with ChatGPT through Codex OAuth — no API key, no billing. Word-level diff, English and 简体中文.">
 <link rel="icon" href="/img/favicon.png" type="image/png">
 <link rel="apple-touch-icon" href="/img/icon-180.png">
 <meta property="og:title" content="PolishPop">
@@ -112,6 +112,16 @@ header .spacer { flex: 1; }
 .btn:hover { filter: brightness(1.07); }
 .btn svg { width: 18px; height: 18px; }
 .cta .meta { margin-top: 12px; font-size: 13.5px; color: var(--fg-faint); }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 18px 0 0; }
+.pill {
+  border: 1px solid var(--border); background: var(--bg-raised); color: var(--fg-muted);
+  border-radius: 999px; padding: 5px 14px; font-size: 13.5px; font-weight: 500;
+}
+.pill-free {
+  border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 9%, var(--bg-raised));
+}
 .cta .meta code { font-size: 12px; word-break: break-all; }
 
 /* Sections */
@@ -220,6 +230,16 @@ code {
         <span lang="en">Version 0.5.0 · 1.9 MB · Apple Silicon · macOS 13 or later</span>
         <span lang="zh">版本 0.5.0 · 1.9 MB · Apple 芯片 · macOS 13 或更高</span>
       </p>
+      <p class="pills">
+        <span class="pill pill-free">
+          <span lang="en">Free — no licence, no API key, no billing</span>
+          <span lang="zh">完全免费 — 无授权费、无 API Key、无计费</span>
+        </span>
+        <span class="pill">
+          <span lang="en">Sign in with ChatGPT via Codex OAuth</span>
+          <span lang="zh">通过 Codex OAuth 用 ChatGPT 登录</span>
+        </span>
+      </p>
       <p class="meta">
         SHA-256 <code>b0343da85b6c1b99136e88509247e0d3453a70653523f299c2b3ad95ba9be491</code>
       </p>
@@ -326,6 +346,42 @@ code {
   </section>
 
   <section>
+    <h2><span lang="en">Free, and how sign-in works</span><span lang="zh">免费,以及登录方式</span></h2>
+    <p class="lede">
+      <span lang="en">PolishPop costs nothing and sells nothing. It signs in to your own ChatGPT account and spends the Codex allowance that account already has.</span>
+      <span lang="zh">PolishPop 不收费,也不卖任何东西。它登录你自己的 ChatGPT 账号,消耗该账号本来就有的 Codex 额度。</span>
+    </p>
+    <ul class="reqs">
+      <li>
+        <span class="k"><span lang="en">The app</span><span lang="zh">这个 app</span></span>
+        <span><span lang="en">Free. No licence key, no trial, no in-app purchase, no ads, no account with us — there is no "us" to have an account with.</span>
+              <span lang="zh">完全免费。没有授权码、没有试用期、没有内购、没有广告,也不需要在我们这边注册账号——本来就没有「我们这边」。</span></span>
+      </li>
+      <li>
+        <span class="k"><span lang="en">Signing in</span><span lang="zh">登录方式</span></span>
+        <span><span lang="en">Codex's official OAuth flow, opened in your browser. You authorise on OpenAI's own page; PolishPop never sees your password. The token is issued to, stored by and refreshed by Codex in the macOS keychain — PolishPop does not read it.</span>
+              <span lang="zh">使用 Codex 官方 OAuth 流程,在你的浏览器中完成。授权页面是 OpenAI 自己的,PolishPop 接触不到你的密码。令牌由 Codex 签发、保存在 macOS 钥匙串并自行刷新,PolishPop 不会读取它。</span></span>
+      </li>
+      <li>
+        <span class="k"><span lang="en">No API key</span><span lang="zh">不用 API Key</span></span>
+        <span><span lang="en">There is nothing to paste and no API bill to pay. Rewrites draw on the Codex allowance included with an eligible ChatGPT plan.</span>
+              <span lang="zh">没有任何密钥需要粘贴,也不会产生 API 账单。润色消耗的是符合条件的 ChatGPT 套餐所含的 Codex 额度。</span></span>
+      </li>
+      <li>
+        <span class="k"><span lang="en">What it cannot reach</span><span lang="zh">访问不到什么</span></span>
+        <span><span lang="en">Custom GPTs, your ChatGPT conversations, history and memory are all out of scope. PolishPop uses an isolated Codex home of its own.</span>
+              <span lang="zh">自定义 GPT、你的 ChatGPT 对话、历史与记忆,一律不在范围内。PolishPop 使用自己独立的 Codex 配置目录。</span></span>
+      </li>
+    </ul>
+    <div class="note">
+      <p>
+        <span lang="en">You do need a ChatGPT plan that includes Codex access — that part is OpenAI's subscription, not ours. If your plan has it, PolishPop adds no cost on top.</span>
+        <span lang="zh">前提是你的 ChatGPT 套餐包含 Codex 权限——那是 OpenAI 的订阅,不是我们的。只要套餐里有,PolishPop 不会再增加任何费用。</span>
+      </p>
+    </div>
+  </section>
+
+  <section>
     <h2><span lang="en">What you need</span><span lang="zh">运行要求</span></h2>
     <ul class="reqs">
       <li>
@@ -375,9 +431,9 @@ code {
            <span lang="zh">系统设置 → 隐私与安全性 → 辅助功能,把 PolishPop 加进去。无需重启,它会自动检测到。</span></p>
       </li>
       <li>
-        <h3><span lang="en">Sign in with ChatGPT</span><span lang="zh">使用 ChatGPT 登录</span></h3>
-        <p><span lang="en">Open PolishPop's settings and sign in. The browser flow is OpenAI's own; PolishPop never sees your password or your token.</span>
-           <span lang="zh">打开 PolishPop 设置并登录。浏览器授权流程由 OpenAI 官方提供,PolishPop 不会接触你的密码或令牌。</span></p>
+        <h3><span lang="en">Sign in with ChatGPT (Codex OAuth)</span><span lang="zh">使用 ChatGPT 登录(Codex OAuth)</span></h3>
+        <p><span lang="en">Open PolishPop's settings and choose <em>Sign in with ChatGPT</em>. Codex's official OAuth page opens in your browser; PolishPop never sees your password or your token. Nothing to pay, nothing to paste.</span>
+           <span lang="zh">打开 PolishPop 设置,点「使用 ChatGPT 登录」。浏览器会打开 Codex 官方 OAuth 授权页,PolishPop 不会接触你的密码或令牌。不用付费,也不用粘贴任何密钥。</span></p>
       </li>
     </ol>
 
