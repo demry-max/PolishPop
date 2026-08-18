@@ -81,6 +81,18 @@ The connection uses a dedicated `CODEX_HOME` under PolishPop’s Application Sup
 
 The version packaged here was built and smoke-tested against `codex-cli 0.147.0`.
 
+## Download
+
+<https://polishpop.eric-c85.workers.dev>
+
+The download page carries the same installation and privacy notes as this file, in English and
+Simplified Chinese, along with the SHA-256 of the archive so it can be checked before opening.
+
+The site is a static Cloudflare Worker; its source is in `site/`, and `wrangler deploy` from that
+directory publishes it. `site/public/PolishPop-*.zip` is deliberately git-ignored — copy the archive
+that `scripts/package_app.sh` produces into `site/public/` before deploying, and update the version
+number and checksum in `site/public/index.html` to match.
+
 ## Install
 
 1. Unzip `PolishPop-0.5.0.zip`.
