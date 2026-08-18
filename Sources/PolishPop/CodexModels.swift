@@ -34,36 +34,35 @@ enum CodexClientError: LocalizedError, Equatable {
     case emptyOutput
     case cancelled
 
-    var errorDescription: String? {
+    var message: LocalizedText {
         switch self {
-        case .cliNotFound:
-            "Codex CLI was not found. Install or update Codex before signing in."
-        case .cliIntegrityFailed:
-            "The installed Codex CLI could not be verified as an OpenAI-signed application."
-        case .cliVersionUnsupported(let version):
-            "Codex CLI 0.147.0 or later is required. Installed version: \(version)."
-        case .defaultKeychainUnavailable:
-            "Your macOS login keychain is unavailable, so Codex cannot save the OAuth credentials."
-        case .processLaunchFailed:
-            "PolishPop could not start the local Codex service."
-        case .processTerminated:
-            "The local Codex service stopped unexpectedly."
-        case .malformedResponse:
-            "The local Codex service returned an unreadable response."
-        case .rpc(_, let message):
-            "Codex could not complete the request: \(message)"
-        case .requestTimedOut:
-            "The local Codex service did not respond in time."
-        case .notAuthenticated:
-            "Sign in with ChatGPT in PolishPop Settings first."
-        case .loginFailed(let message):
-            "ChatGPT sign-in failed: \(message)"
-        case .generationFailed(let message):
-            "Codex could not polish the text: \(message)"
-        case .emptyOutput:
-            "Codex completed without returning polished text."
-        case .cancelled:
-            "The Codex rewrite was cancelled."
+        case .cliNotFound: ErrorStrings.cliNotFound
+        case .cliIntegrityFailed: ErrorStrings.cliIntegrityFailed
+        case .cliVersionUnsupported(let version): ErrorStrings.cliVersionUnsupported(version)
+        case .defaultKeychainUnavailable: ErrorStrings.defaultKeychainUnavailable
+        case .processLaunchFailed: ErrorStrings.processLaunchFailed
+        case .processTerminated: ErrorStrings.processTerminated
+        case .malformedResponse: ErrorStrings.malformedResponse
+        case .rpc(_, let message): ErrorStrings.rpc(message)
+        case .requestTimedOut: ErrorStrings.requestTimedOut
+        case .notAuthenticated: ErrorStrings.notAuthenticated
+        case .loginFailed(let message): ErrorStrings.loginFailed(message)
+        case .generationFailed(let message): ErrorStrings.generationFailed(message)
+        case .emptyOutput: ErrorStrings.emptyOutput
+        case .cancelled: ErrorStrings.cancelled
+        }
+    }
+
+    var errorDescription: String? { message.en }
+
+    /// True when the fix is something the user does in Settings rather than by retrying.
+    var isSetupProblem: Bool {
+        switch self {
+        case .cliNotFound, .cliIntegrityFailed, .cliVersionUnsupported,
+             .defaultKeychainUnavailable, .notAuthenticated, .loginFailed:
+            true
+        default:
+            false
         }
     }
 }

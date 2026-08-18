@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PolishPop — Polish any selected text on macOS</title>
+<meta name="description" content="A macOS menu-bar app that rewrites the text you selected, in any app. Word-level diff, six use cases, five tones, English and 简体中文.">
+<link rel="icon" href="/img/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="/img/icon-180.png">
+<meta property="og:title" content="PolishPop">
+<meta property="og:description" content="Select text anywhere on macOS, press ⌥⌘P, review what changed, replace in place.">
+<meta property="og:image" content="/img/icon.png">
+<meta property="og:type" content="website">
+<style>
+:root {
+  --bg: #fbfaff;
+  --bg-raised: #ffffff;
+  --fg: #17151f;
+  --fg-muted: #5f5a70;
+  --fg-faint: #8b869c;
+  --accent: #7c3aed;
+  --accent-soft: #f1ebfe;
+  --border: #e6e2f0;
+  --shadow: 0 1px 2px rgba(23,21,31,.05), 0 12px 32px -12px rgba(23,21,31,.16);
+  --ok: #12855a;
+  --warn: #a5590a;
+  --warn-bg: #fdf6ec;
+  --warn-border: #f0dcbe;
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e0d13;
+    --bg-raised: #17161f;
+    --fg: #f2f0f7;
+    --fg-muted: #a9a4bb;
+    --fg-faint: #7d788f;
+    --accent: #a78bfa;
+    --accent-soft: #221c38;
+    --border: #29253a;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 32px -12px rgba(0,0,0,.6);
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --warn-bg: #241c0d;
+    --warn-border: #4a3a16;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+:lang(zh) { line-height: 1.75; }
+
+/* Language switching: both languages ship in the markup, CSS picks one. */
+html:not(.zh) [lang="zh"] { display: none; }
+html.zh [lang="en"] { display: none; }
+
+.wrap { max-width: 940px; margin: 0 auto; padding: 0 22px; }
+a { color: var(--accent); }
+
+/* Header */
+header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 20px 0 8px;
+}
+header .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: -.01em; }
+header .brand img { width: 30px; height: 30px; border-radius: 7px; }
+header .spacer { flex: 1; }
+.langtoggle {
+  display: inline-flex; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg-raised); overflow: hidden; font-size: 13px;
+}
+.langtoggle button {
+  appearance: none; border: 0; background: transparent; color: var(--fg-muted);
+  padding: 5px 13px; cursor: pointer; font: inherit;
+}
+.langtoggle button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+
+/* Hero */
+.hero { padding: 46px 0 28px; text-align: center; }
+.hero img.appicon {
+  width: 104px; height: 104px; border-radius: 23px;
+  box-shadow: var(--shadow);
+}
+.hero h1 {
+  font-size: clamp(34px, 6vw, 50px); line-height: 1.1; margin: 22px 0 0;
+  letter-spacing: -.025em; font-weight: 700;
+}
+.hero .tagline {
+  font-size: clamp(17px, 2.6vw, 21px); color: var(--fg-muted);
+  margin: 14px auto 0; max-width: 30em;
+}
+.kbd {
+  display: inline-block; padding: 1px 7px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg-raised);
+  font-size: .88em; font-weight: 600; white-space: nowrap;
+}
+
+/* Download */
+.cta { margin: 30px 0 0; }
+.btn {
+  display: inline-flex; align-items: center; gap: 10px;
+  background: var(--accent); color: #fff; text-decoration: none;
+  padding: 14px 26px; border-radius: 12px; font-weight: 600; font-size: 17px;
+  box-shadow: var(--shadow);
+}
+.btn:hover { filter: brightness(1.07); }
+.btn svg { width: 18px; height: 18px; }
+.cta .meta { margin-top: 12px; font-size: 13.5px; color: var(--fg-faint); }
+.cta .meta code { font-size: 12px; word-break: break-all; }
+
+/* Sections */
+section { padding: 42px 0; border-top: 1px solid var(--border); }
+section:first-of-type { border-top: 0; }
+h2 { font-size: 25px; letter-spacing: -.02em; margin: 0 0 6px; }
+h2 + .lede { color: var(--fg-muted); margin: 0 0 24px; max-width: 46em; }
+h3 { font-size: 16.5px; margin: 0 0 4px; }
+
+/* Shot */
+figure { margin: 0; }
+figure img {
+  width: 100%; height: auto; display: block;
+  border-radius: var(--radius); border: 1px solid var(--border);
+  box-shadow: var(--shadow); background: var(--bg-raised);
+}
+figcaption { margin-top: 10px; font-size: 13.5px; color: var(--fg-faint); text-align: center; }
+.shots { display: grid; gap: 26px; grid-template-columns: 1fr 1fr; }
+@media (max-width: 720px) { .shots { grid-template-columns: 1fr; } }
+
+/* Features */
+.features { display: grid; gap: 22px; grid-template-columns: repeat(2, 1fr); }
+@media (max-width: 720px) { .features { grid-template-columns: 1fr; } }
+.feature { display: flex; gap: 13px; }
+.feature .dot {
+  flex: 0 0 auto; width: 30px; height: 30px; border-radius: 9px;
+  background: var(--accent-soft); color: var(--accent);
+  display: grid; place-items: center; font-size: 15px;
+}
+.feature p { margin: 0; color: var(--fg-muted); font-size: 15px; }
+
+/* Steps */
+ol.steps { counter-reset: s; list-style: none; padding: 0; margin: 0; }
+ol.steps li {
+  counter-increment: s; position: relative; padding-left: 42px; margin-bottom: 20px;
+}
+ol.steps li::before {
+  content: counter(s); position: absolute; left: 0; top: -1px;
+  width: 27px; height: 27px; border-radius: 50%;
+  background: var(--accent-soft); color: var(--accent);
+  display: grid; place-items: center; font-size: 14px; font-weight: 650;
+}
+ol.steps p { margin: 4px 0 0; color: var(--fg-muted); font-size: 15px; }
+
+/* Callout */
+.note {
+  background: var(--warn-bg); border: 1px solid var(--warn-border);
+  border-radius: var(--radius); padding: 15px 17px; margin: 22px 0 0;
+  font-size: 14.5px;
+}
+.note strong { color: var(--warn); }
+.note p { margin: 0; }
+.note p + p { margin-top: 9px; }
+
+/* Requirement list */
+ul.reqs { list-style: none; padding: 0; margin: 0; }
+ul.reqs li {
+  padding: 11px 0; border-bottom: 1px solid var(--border);
+  display: flex; gap: 12px; align-items: baseline; font-size: 15px;
+}
+ul.reqs li:last-child { border-bottom: 0; }
+ul.reqs .k { flex: 0 0 190px; color: var(--fg-faint); }
+@media (max-width: 560px) { ul.reqs li { flex-direction: column; gap: 2px; } ul.reqs .k { flex: none; } }
+
+footer {
+  border-top: 1px solid var(--border); padding: 30px 0 60px;
+  color: var(--fg-faint); font-size: 13.5px;
+}
+footer p { margin: 0 0 8px; }
+code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; font-size: .88em;
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <span class="brand"><img src="/img/icon.png" alt="">PolishPop</span>
+    <span class="spacer"></span>
+    <span class="langtoggle" role="group" aria-label="Language">
+      <button type="button" data-set-lang="en" aria-pressed="true">English</button>
+      <button type="button" data-set-lang="zh" aria-pressed="false">中文</button>
+    </span>
+  </header>
+
+  <div class="hero">
+    <img class="appicon" src="/img/icon.png" alt="PolishPop app icon" width="104" height="104">
+    <h1>
+      <span lang="en">Polish any text you select</span>
+      <span lang="zh">润色你选中的任何文字</span>
+    </h1>
+    <p class="tagline">
+      <span lang="en">Select text in any macOS app, press <span class="kbd">⌥⌘P</span>, see exactly what changed, and replace it in place.</span>
+      <span lang="zh">在任何 macOS 应用里选中文字,按 <span class="kbd">⌥⌘P</span>,逐词看清改了什么,再原地替换。</span>
+    </p>
+
+    <div class="cta">
+      <a class="btn" href="/PolishPop-0.5.0.zip" download>
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1a.75.75 0 0 1 .75.75v7.19l2.22-2.22a.75.75 0 1 1 1.06 1.06l-3.5 3.5a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 0 1 1.06-1.06l2.22 2.22V1.75A.75.75 0 0 1 8 1ZM2.75 12.5a.75.75 0 0 1 .75.75v.25h9v-.25a.75.75 0 0 1 1.5 0v.5A1.25 1.25 0 0 1 12.75 15h-9.5A1.25 1.25 0 0 1 2 13.75v-.5a.75.75 0 0 1 .75-.75Z"/></svg>
+        <span lang="en">Download for macOS</span>
+        <span lang="zh">下载 macOS 版</span>
+      </a>
+      <p class="meta">
+        <span lang="en">Version 0.5.0 · 1.9 MB · Apple Silicon · macOS 13 or later</span>
+        <span lang="zh">版本 0.5.0 · 1.9 MB · Apple 芯片 · macOS 13 或更高</span>
+      </p>
+      <p class="meta">
+        SHA-256 <code>b0343da85b6c1b99136e88509247e0d3453a70653523f299c2b3ad95ba9be491</code>
+      </p>
+    </div>
+  </div>
+
+  <section>
+    <figure>
+      <img src="/img/review-ready-en.png" alt="PolishPop review panel showing the original text on the left with deletions struck through, and the polished draft on the right with insertions highlighted">
+      <figcaption>
+        <span lang="en">The review panel. Nothing is replaced until you choose <em>Replace Original</em>.</span>
+        <span lang="zh">校对面板。在你点击「替换原文」之前,原文不会有任何改动。</span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2><span lang="en">What it does</span><span lang="zh">它能做什么</span></h2>
+    <p class="lede">
+      <span lang="en">PolishPop lives in the menu bar. It reads only the text you deliberately select, rewrites it, and shows you the result before touching anything.</span>
+      <span lang="zh">PolishPop 常驻菜单栏。它只读取你主动选中的文字,润色之后先给你看结果,再决定要不要替换。</span>
+    </p>
+
+    <div class="features">
+      <div class="feature">
+        <span class="dot">±</span>
+        <div>
+          <h3><span lang="en">See every change</span><span lang="zh">改动一目了然</span></h3>
+          <p>
+            <span lang="en">A word-level diff highlights what was added and removed — character by character for Chinese, which has no spaces between words.</span>
+            <span lang="zh">逐词高亮增删内容;中文没有词间空格,所以按字高亮。</span>
+          </p>
+        </div>
+      </div>
+      <div class="feature">
+        <span class="dot">✎</span>
+        <div>
+          <h3><span lang="en">Six use cases, five tones</span><span lang="zh">六种用途,五种语气</span></h3>
+          <p>
+            <span lang="en">Email, chat message, social post, business update, announcement, or let it infer the format. Professional, natural, friendly, concise or executive.</span>
+            <span lang="zh">邮件、即时消息、朋友圈、工作汇报、通知公告,或让它自动识别格式。语气可选专业、自然、亲切、精简、决断。</span>
+          </p>
+        </div>
+      </div>
+      <div class="feature">
+        <span class="dot">⏎</span>
+        <div>
+          <h3><span lang="en">Replaces in place</span><span lang="zh">原地替换</span></h3>
+          <p>
+            <span lang="en">The draft goes back into the field you selected it from. If the app will not accept a direct write, PolishPop pastes it and restores your previous clipboard.</span>
+            <span lang="zh">润色结果写回你选中它的那个输入框。若该应用不接受直接写入,则临时用粘贴方式替换,随后恢复你原本的剪贴板。</span>
+          </p>
+        </div>
+      </div>
+      <div class="feature">
+        <span class="dot">↩</span>
+        <div>
+          <h3><span lang="en">Instant mode, with undo</span><span lang="zh">快速模式,可撤销</span></h3>
+          <p>
+            <span lang="en">An optional second shortcut skips the review panel entirely. Your original wording is kept so one click puts it back.</span>
+            <span lang="zh">可选的第二个快捷键直接跳过校对面板。原文会被保留,一键即可还原。</span>
+          </p>
+        </div>
+      </div>
+      <div class="feature">
+        <span class="dot">◔</span>
+        <div>
+          <h3><span lang="en">Never interrupts you</span><span lang="zh">不打断你</span></h3>
+          <p>
+            <span lang="en">No modal dialogs and no focus stealing. Status appears as a small panel beside your cursor that goes away on its own.</span>
+            <span lang="zh">没有模态对话框,不抢焦点。状态以光标旁的小提示出现,自动消失。</span>
+          </p>
+        </div>
+      </div>
+      <div class="feature">
+        <span class="dot">文</span>
+        <div>
+          <h3><span lang="en">English and 简体中文</span><span lang="zh">中英双语界面</span></h3>
+          <p>
+            <span lang="en">The interface follows your system language and can be switched by hand. It never changes the language your text is written in.</span>
+            <span lang="zh">界面跟随系统语言,也可手动切换。它不会改变你原文的语言。</span>
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span lang="en">In both languages</span><span lang="zh">两种界面语言</span></h2>
+    <p class="lede">
+      <span lang="en">The same panel, and the same settings, in whichever language you read.</span>
+      <span lang="zh">同一个面板、同一套设置,用你习惯的语言。</span>
+    </p>
+    <div class="shots">
+      <figure>
+        <img src="/img/review-ready-zh.png" alt="The review panel in Simplified Chinese">
+        <figcaption><span lang="en">Review panel, 简体中文</span><span lang="zh">校对面板(中文)</span></figcaption>
+      </figure>
+      <figure>
+        <img src="/img/settings-general-en.png" alt="PolishPop settings, General tab">
+        <figcaption><span lang="en">Settings — shortcuts are recordable</span><span lang="zh">设置 — 快捷键可自定义录制</span></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section>
+    <h2><span lang="en">What you need</span><span lang="zh">运行要求</span></h2>
+    <ul class="reqs">
+      <li>
+        <span class="k"><span lang="en">Mac</span><span lang="zh">机器</span></span>
+        <span><span lang="en">Apple Silicon, macOS 13 or later</span><span lang="zh">Apple 芯片,macOS 13 或更高版本</span></span>
+      </li>
+      <li>
+        <span class="k"><span lang="en">Codex CLI</span><span lang="zh">Codex 命令行</span></span>
+        <span>
+          <span lang="en">Version 0.147.0 or later, installed separately: <code>npm install -g @openai/codex</code></span>
+          <span lang="zh">0.147.0 或更高版本,需自行安装:<code>npm install -g @openai/codex</code></span>
+        </span>
+      </li>
+      <li>
+        <span class="k"><span lang="en">ChatGPT account</span><span lang="zh">ChatGPT 账号</span></span>
+        <span>
+          <span lang="en">An eligible plan with Codex access. PolishPop uses that plan's Codex allowance — there is no API key and no separate API billing.</span>
+          <span lang="zh">需包含 Codex 权限的套餐。PolishPop 消耗该套餐的 Codex 额度,不需要 API Key,也不产生单独的 API 账单。</span>
+        </span>
+      </li>
+      <li>
+        <span class="k"><span lang="en">Permission</span><span lang="zh">系统权限</span></span>
+        <span>
+          <span lang="en">Accessibility, so PolishPop can read your selection and write the result back.</span>
+          <span lang="zh">辅助功能权限,用于读取选中文字并把结果写回。</span>
+        </span>
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span lang="en">Installing</span><span lang="zh">安装步骤</span></h2>
+    <ol class="steps">
+      <li>
+        <h3><span lang="en">Unzip and move to Applications</span><span lang="zh">解压并移到「应用程序」</span></h3>
+        <p><span lang="en">Keep only one copy. Two copies of the same app confuse macOS about which one holds your Accessibility permission.</span>
+           <span lang="zh">只保留一份。同一个 app 存在两份副本会让 macOS 分不清权限该给谁。</span></p>
+      </li>
+      <li>
+        <h3><span lang="en">Control-click the app, then choose Open</span><span lang="zh">按住 Control 点击 app,选择「打开」</span></h3>
+        <p><span lang="en">Only needed the first time. Double-clicking will be refused, because this build is not notarized by Apple.</span>
+           <span lang="zh">只需第一次这样做。直接双击会被拒绝,因为这个版本没有经过 Apple 公证。</span></p>
+      </li>
+      <li>
+        <h3><span lang="en">Grant Accessibility permission</span><span lang="zh">授予辅助功能权限</span></h3>
+        <p><span lang="en">System Settings → Privacy &amp; Security → Accessibility, then add PolishPop. It detects the change without a restart.</span>
+           <span lang="zh">系统设置 → 隐私与安全性 → 辅助功能,把 PolishPop 加进去。无需重启,它会自动检测到。</span></p>
+      </li>
+      <li>
+        <h3><span lang="en">Sign in with ChatGPT</span><span lang="zh">使用 ChatGPT 登录</span></h3>
+        <p><span lang="en">Open PolishPop's settings and sign in. The browser flow is OpenAI's own; PolishPop never sees your password or your token.</span>
+           <span lang="zh">打开 PolishPop 设置并登录。浏览器授权流程由 OpenAI 官方提供,PolishPop 不会接触你的密码或令牌。</span></p>
+      </li>
+    </ol>
+
+    <div class="note">
+      <p><strong><span lang="en">This build is signed, but not notarized.</span><span lang="zh">这个版本已签名,但未经 Apple 公证。</span></strong></p>
+      <p>
+        <span lang="en">It is signed with a self-issued certificate so that your Accessibility permission survives updates, but Apple has not notarized it, so Gatekeeper will call the developer unidentified on first launch. Control-click → Open once and macOS remembers.</span>
+        <span lang="zh">它使用自签发证书签名,好让辅助功能授权在更新后依然有效;但 Apple 没有对它公证,所以首次启动时 Gatekeeper 会提示开发者身份不明。按住 Control 点击 → 打开,一次之后 macOS 就会记住。</span>
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span lang="en">Privacy</span><span lang="zh">隐私</span></h2>
+    <p class="lede">
+      <span lang="en">Text leaves your Mac only when you ask for a rewrite — never while you are simply selecting or typing.</span>
+      <span lang="zh">只有你主动要求润色时,文字才会离开你的电脑——只是选中或打字时不会。</span>
+    </p>
+    <ul class="reqs">
+      <li>
+        <span class="k"><span lang="en">What is sent</span><span lang="zh">发送什么</span></span>
+        <span><span lang="en">Only the selection, and only after you click the sparkle button or press the shortcut.</span>
+              <span lang="zh">仅发送你选中的那段文字,且仅在你点击闪光按钮或按下快捷键之后。</span></span>
+      </li>
+      <li>
+        <span class="k"><span lang="en">Where it goes</span><span lang="zh">发送到哪</span></span>
+        <span><span lang="en">To OpenAI through the official Codex app server, in a fresh throwaway session each time, with transcript history disabled.</span>
+              <span lang="zh">经由官方 Codex 服务发送给 OpenAI,每次都是全新的一次性会话,且已关闭记录留存。</span></span>
+      </li>
+      <li>
+        <span class="k"><span lang="en">What is stored</span><span lang="zh">保存什么</span></span>
+        <span><span lang="en">Nothing. PolishPop keeps the last result in memory for five minutes so you can copy it again, then drops it.</span>
+              <span lang="zh">不保存。最近一次结果仅在内存中保留五分钟供你再次复制,之后即丢弃。</span></span>
+      </li>
+      <li>
+        <span class="k"><span lang="en">What is refused</span><span lang="zh">拒绝读取</span></span>
+        <span><span lang="en">Password fields and DRM-protected content are never read.</span>
+              <span lang="zh">密码输入框和受 DRM 保护的内容,一律不读取。</span></span>
+      </li>
+    </ul>
+    <div class="note">
+      <p>
+        <span lang="en">Your ChatGPT plan's own data controls, retention rules and usage limits still apply. Do not select passwords, banking details, private keys or confidential records.</span>
+        <span lang="zh">你的 ChatGPT 套餐自身的数据控制、留存规则与用量限制依然适用。请勿选中密码、银行信息、私钥或机密资料。</span>
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      <span lang="en">PolishPop 0.5.0 — a personal project, distributed directly. Not affiliated with Apple or OpenAI.</span>
+      <span lang="zh">PolishPop 0.5.0 — 个人项目,直接分发。与 Apple、OpenAI 无隶属关系。</span>
+    </p>
+    <p>
+      <span lang="en">Selection support is best-effort: some canvas-based web editors, PDFs and custom text controls do not expose their text to macOS at all.</span>
+      <span lang="zh">选区支持为尽力而为:部分基于 canvas 的网页编辑器、PDF 和自定义文本控件根本不向 macOS 暴露文字内容。</span>
+    </p>
+  </footer>
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var buttons = document.querySelectorAll('[data-set-lang]');
+
+  function apply(lang, remember) {
+    root.classList.toggle('zh', lang === 'zh');
+    root.setAttribute('lang', lang === 'zh' ? 'zh-Hans' : 'en');
+    buttons.forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.setLang === lang));
+    });
+    if (remember) {
+      try { localStorage.setItem('polishpop-lang', lang); } catch (e) {}
+    }
+  }
+
+  var stored = null;
+  try { stored = localStorage.getItem('polishpop-lang'); } catch (e) {}
+  var preferred = stored || ((navigator.language || 'en').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en');
+  apply(preferred, false);
+
+  buttons.forEach(function (b) {
+    b.addEventListener('click', function () { apply(b.dataset.setLang, true); });
+  });
+})();
+</script>
+</body>
+</html>

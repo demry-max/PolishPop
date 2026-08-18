@@ -1,7 +1,7 @@
 import AppKit
 @preconcurrency import ApplicationServices
 
-enum PolishTone: String, CaseIterable, Identifiable {
+enum PolishTone: String, CaseIterable, Identifiable, Sendable {
     case natural
     case professional
     case friendly
@@ -10,13 +10,23 @@ enum PolishTone: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
+    var title: LocalizedText {
         switch self {
-        case .natural: "Natural"
-        case .professional: "Professional"
-        case .friendly: "Friendly"
-        case .concise: "Concise"
-        case .executive: "Executive"
+        case .natural: LocalizedText("Natural", "自然")
+        case .professional: LocalizedText("Professional", "专业")
+        case .friendly: LocalizedText("Friendly", "亲切")
+        case .concise: LocalizedText("Concise", "精简")
+        case .executive: LocalizedText("Executive", "决断")
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .natural: "leaf"
+        case .professional: "briefcase"
+        case .friendly: "hand.wave"
+        case .concise: "scissors"
+        case .executive: "chart.line.uptrend.xyaxis"
         }
     }
 
@@ -36,7 +46,7 @@ enum PolishTone: String, CaseIterable, Identifiable {
     }
 }
 
-enum PolishPurpose: String, CaseIterable, Identifiable {
+enum PolishPurpose: String, CaseIterable, Identifiable, Sendable {
     case smart
     case email
     case chat
@@ -46,14 +56,25 @@ enum PolishPurpose: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
+    var title: LocalizedText {
         switch self {
-        case .smart: "Smart / Auto"
-        case .email: "Email"
-        case .chat: "Chat message"
-        case .social: "Social post / 朋友圈"
-        case .businessUpdate: "Business update"
-        case .announcement: "Announcement"
+        case .smart: LocalizedText("Smart / Auto", "智能识别")
+        case .email: LocalizedText("Email", "邮件")
+        case .chat: LocalizedText("Chat message", "即时消息")
+        case .social: LocalizedText("Social post", "朋友圈 / 社交动态")
+        case .businessUpdate: LocalizedText("Business update", "工作汇报")
+        case .announcement: LocalizedText("Announcement", "通知公告")
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .smart: "wand.and.stars"
+        case .email: "envelope"
+        case .chat: "bubble.left.and.bubble.right"
+        case .social: "person.2"
+        case .businessUpdate: "chart.bar.doc.horizontal"
+        case .announcement: "megaphone"
         }
     }
 
@@ -75,12 +96,14 @@ enum PolishPurpose: String, CaseIterable, Identifiable {
     }
 }
 
-struct SelectionSnapshot {
+struct SelectionSnapshot: @unchecked Sendable {
     let text: String
     let element: AXUIElement
     let targetPID: pid_t
     let selectedRange: CFRange
     let targetApplication: NSRunningApplication?
+    /// False for read-only text such as a rendered web page, where the draft can only be copied.
+    let isReplaceable: Bool
     let capturedAt: Date
 
     init(
@@ -89,6 +112,7 @@ struct SelectionSnapshot {
         targetPID: pid_t,
         selectedRange: CFRange,
         targetApplication: NSRunningApplication?,
+        isReplaceable: Bool,
         capturedAt: Date = Date()
     ) {
         self.text = text
@@ -96,8 +120,30 @@ struct SelectionSnapshot {
         self.targetPID = targetPID
         self.selectedRange = selectedRange
         self.targetApplication = targetApplication
+        self.isReplaceable = isReplaceable
         self.capturedAt = capturedAt
     }
+
+    var targetApplicationName: String? {
+        targetApplication?.localizedName
+    }
+
+    /// Same field, same range, same text — used to tell a fresh probe from a repeat of one
+    /// already on screen so the sparkle does not flicker.
+    func matchesLocation(of other: SelectionSnapshot) -> Bool {
+        targetPID == other.targetPID
+            && CFEqual(element, other.element)
+            && selectedRange.location == other.selectedRange.location
+            && selectedRange.length == other.selectedRange.length
+            && text == other.text
+    }
+}
+
+/// What PolishPop wrote, where it wrote it, and what was there before — everything undo needs.
+struct ReplacementRecord: @unchecked Sendable {
+    let snapshot: SelectionSnapshot
+    let original: String
+    let applied: String
 }
 
 enum FloatingPhase: Equatable {
@@ -115,20 +161,16 @@ enum PolishPopError: LocalizedError, Equatable {
     case selectionTooLong(limit: Int)
     case replacementFailed
 
-    var errorDescription: String? {
+    var message: LocalizedText {
         switch self {
-        case .accessibilityPermissionMissing:
-            "Accessibility permission is required to read and replace selected text."
-        case .noSelection:
-            "Select some editable text first."
-        case .protectedTextField:
-            "PolishPop never reads passwords or other protected text fields."
-        case .selectionChanged:
-            "The selected text changed before the rewrite was ready. Please try again."
-        case .selectionTooLong(let limit):
-            "The selection is too long. Please select fewer than \(limit.formatted()) characters."
-        case .replacementFailed:
-            "PolishPop could not replace the selection. The polished text is available from the menu-bar item."
+        case .accessibilityPermissionMissing: ErrorStrings.accessibilityPermissionMissing
+        case .noSelection: ErrorStrings.noSelection
+        case .protectedTextField: ErrorStrings.protectedTextField
+        case .selectionChanged: ErrorStrings.selectionChanged
+        case .selectionTooLong(let limit): ErrorStrings.selectionTooLong(limit: limit)
+        case .replacementFailed: ErrorStrings.replacementFailed
         }
     }
+
+    var errorDescription: String? { message.en }
 }

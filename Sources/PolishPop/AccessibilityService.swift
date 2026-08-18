@@ -1,9 +1,19 @@
 import AppKit
 @preconcurrency import ApplicationServices
 
+/// Reads the user's selection and writes the polished text back.
+///
+/// The blocking Accessibility calls all happen on `AXQueue`; this type only orchestrates them and
+/// owns the clipboard-restoring paste fallback.
 @MainActor
 final class AccessibilityService {
     static let maximumSelectionLength = 30_000
+
+    /// Short enough that an unresponsive application cannot make the sparkle button lag behind
+    /// the user's selection.
+    private static let probeTimeout: Float = 0.12
+    /// The user has asked for a rewrite and is willing to wait a moment for it.
+    private static let captureTimeout: Float = 0.4
 
     var isTrusted: Bool {
         AXIsProcessTrusted()
@@ -17,108 +27,177 @@ final class AccessibilityService {
         return AXIsProcessTrustedWithOptions(options)
     }
 
-    func currentSelection() throws -> SelectionSnapshot {
+    /// Cheap, best-effort read used to decide whether to offer the sparkle button.
+    ///
+    /// Returns `nil` rather than throwing because "there is no selection right now" is the normal
+    /// case after most clicks, not an error worth reporting.
+    func probeSelection() async -> SelectionSnapshot? {
+        guard isTrusted else { return nil }
+        let limit = Self.maximumSelectionLength
+        let timeout = Self.probeTimeout
+        let reading = await AXQueue.shared.run { () -> AXSelectionReading? in
+            try? AXReader.readSelection(
+                timeout: timeout,
+                deepProtectedScan: false,
+                maximumLength: limit
+            )
+        }
+        guard let reading else { return nil }
+        return snapshot(from: reading)
+    }
+
+    /// Full read performed immediately before text is sent, including the ancestor scan for
+    /// DRM-protected containers.
+    func currentSelection() async throws -> SelectionSnapshot {
         guard isTrusted else {
             throw PolishPopError.accessibilityPermissionMissing
         }
+        let limit = Self.maximumSelectionLength
+        let timeout = Self.captureTimeout
 
-        let systemWide = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(systemWide, 0.4)
-        var focusedValue: CFTypeRef?
-        let focusedStatus = AXUIElementCopyAttributeValue(
-            systemWide,
-            kAXFocusedUIElementAttribute as CFString,
-            &focusedValue
-        )
-        guard focusedStatus == .success,
-              let focusedValue,
-              CFGetTypeID(focusedValue) == AXUIElementGetTypeID() else {
-            throw PolishPopError.noSelection
+        let result = await AXQueue.shared.run { () -> Result<AXSelectionReading, AXReader.ReadError> in
+            do {
+                return .success(
+                    try AXReader.readSelection(
+                        timeout: timeout,
+                        deepProtectedScan: true,
+                        maximumLength: limit
+                    )
+                )
+            } catch let error as AXReader.ReadError {
+                return .failure(error)
+            } catch {
+                return .failure(.noSelection)
+            }
         }
 
-        let element = unsafeDowncast(focusedValue, to: AXUIElement.self)
-        AXUIElementSetMessagingTimeout(element, 0.4)
-        guard !isSecureTextField(element), !containsProtectedContent(element) else {
+        switch result {
+        case .success(let reading):
+            return snapshot(from: reading)
+        case .failure(.protectedField):
             throw PolishPopError.protectedTextField
-        }
-        guard let selectedText = selectedText(in: element), !selectedText.isEmpty else {
-            throw PolishPopError.noSelection
-        }
-        guard selectedText.count <= Self.maximumSelectionLength else {
+        case .failure(.tooLong):
             throw PolishPopError.selectionTooLong(limit: Self.maximumSelectionLength)
-        }
-
-        var pid: pid_t = 0
-        guard AXUIElementGetPid(element, &pid) == .success,
-              let selectedRange = selectedRange(in: element) else {
+        case .failure:
             throw PolishPopError.noSelection
         }
-
-        return SelectionSnapshot(
-            text: selectedText,
-            element: element,
-            targetPID: pid,
-            selectedRange: selectedRange,
-            targetApplication: NSWorkspace.shared.frontmostApplication
-        )
     }
 
-    func selectionBounds(for snapshot: SelectionSnapshot) -> CGRect? {
-        var rangeValue: CFTypeRef?
-        let rangeStatus = AXUIElementCopyAttributeValue(
-            snapshot.element,
-            kAXSelectedTextRangeAttribute as CFString,
-            &rangeValue
-        )
-        guard rangeStatus == .success,
-              let rangeValue,
-              CFGetTypeID(rangeValue) == AXValueGetTypeID() else {
-            return nil
+    /// Screen rectangle of the selection, used to anchor the sparkle button to the text.
+    func selectionBounds(for snapshot: SelectionSnapshot) async -> CGRect? {
+        let box = AXElementBox(snapshot.element)
+        let timeout = Self.probeTimeout
+        return await AXQueue.shared.run {
+            AXReader.selectionBounds(for: box.element, timeout: timeout)
+        }
+    }
+
+    /// Reselects text PolishPop wrote and puts the user's original wording back.
+    ///
+    /// Undo cannot reuse the normal path: after a replacement the caret is collapsed, so there is
+    /// no selection to validate against. The applied range is reselected first, and only if the
+    /// field really contains what PolishPop wrote is anything changed.
+    func restoreOriginal(_ record: ReplacementRecord) async throws {
+        guard let targetApplication = record.snapshot.targetApplication,
+              !targetApplication.isTerminated else {
+            throw PolishPopError.selectionChanged
+        }
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier != record.snapshot.targetPID {
+            targetApplication.activate(options: [.activateIgnoringOtherApps])
+            try await waitForFrontmost(pid: record.snapshot.targetPID)
         }
 
-        var boundsValue: CFTypeRef?
-        let boundsStatus = AXUIElementCopyParameterizedAttributeValue(
-            snapshot.element,
-            kAXBoundsForRangeParameterizedAttribute as CFString,
-            rangeValue,
-            &boundsValue
+        let box = AXElementBox(record.snapshot.element)
+        let appliedRange = CFRange(
+            location: record.snapshot.selectedRange.location,
+            length: record.applied.utf16.count
         )
-        guard boundsStatus == .success,
-              let boundsValue,
-              CFGetTypeID(boundsValue) == AXValueGetTypeID() else {
-            return nil
+        let applied = record.applied
+        let timeout = Self.captureTimeout
+
+        let reselected = await AXQueue.shared.run { () -> Bool in
+            AXUIElementSetMessagingTimeout(box.element, timeout)
+            _ = AXUIElementSetAttributeValue(box.element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            guard AXReader.setSelectedRange(element: box.element, range: appliedRange, timeout: timeout) else {
+                return false
+            }
+            return AXReader.selectedText(in: box.element) == applied
+        }
+        guard reselected else {
+            throw PolishPopError.selectionChanged
         }
 
-        let axValue = unsafeDowncast(boundsValue, to: AXValue.self)
-        guard AXValueGetType(axValue) == .cgRect else { return nil }
-        var rect = CGRect.zero
-        guard AXValueGetValue(axValue, .cgRect, &rect) else { return nil }
-        return rect
+        let restoredSnapshot = SelectionSnapshot(
+            text: applied,
+            element: record.snapshot.element,
+            targetPID: record.snapshot.targetPID,
+            selectedRange: appliedRange,
+            targetApplication: targetApplication,
+            isReplaceable: record.snapshot.isReplaceable
+        )
+        try await replace(restoredSnapshot, with: record.original, allowClipboardFallback: true)
+    }
+
+    func copyToPasteboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    // MARK: - Replacement
+
+    /// Replaces the reviewed selection after bringing the source application back to the front.
+    ///
+    /// A direct Accessibility write is tried first because it never touches the clipboard; the
+    /// paste fallback only runs when the target application refuses or silently ignores the write.
+    func replaceFromReview(
+        _ snapshot: SelectionSnapshot,
+        with replacement: String,
+        allowClipboardFallback: Bool
+    ) async throws {
+        guard let targetApplication = snapshot.targetApplication,
+              !targetApplication.isTerminated else {
+            throw PolishPopError.selectionChanged
+        }
+
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier != snapshot.targetPID {
+            targetApplication.activate(options: [.activateIgnoringOtherApps])
+            try await waitForFrontmost(pid: snapshot.targetPID)
+        }
+
+        try await replace(
+            snapshot,
+            with: replacement,
+            allowClipboardFallback: allowClipboardFallback
+        )
     }
 
     func replace(
         _ snapshot: SelectionSnapshot,
         with replacement: String,
-        allowClipboardFallback: Bool,
-        forcePaste: Bool = false
+        allowClipboardFallback: Bool
     ) async throws {
-        try validateTarget(snapshot)
+        try await ensureSelectionReady(snapshot)
 
-        if !forcePaste {
-            let directStatus = AXUIElementSetAttributeValue(
-                snapshot.element,
-                kAXSelectedTextAttribute as CFString,
-                replacement as CFTypeRef
+        let box = AXElementBox(snapshot.element)
+        let timeout = Self.captureTimeout
+        let directSucceeded = await AXQueue.shared.run {
+            AXReader.setSelectedTextVerified(
+                element: box.element,
+                replacement: replacement,
+                timeout: timeout
             )
-            if directStatus == .success {
-                return
-            }
         }
+        if directSucceeded { return }
 
         guard allowClipboardFallback, snapshot.targetApplication != nil else {
             throw PolishPopError.replacementFailed
         }
+        try await pasteReplacement(replacement, into: snapshot)
+    }
 
+    /// Puts the draft on the clipboard just long enough to synthesise one Command-V into the
+    /// target process, then puts the user's own clipboard back.
+    private func pasteReplacement(_ replacement: String, into snapshot: SelectionSnapshot) async throws {
         let savedItems = clonePasteboardItems(NSPasteboard.general.pasteboardItems)
         let savedString = NSPasteboard.general.string(forType: .string)
         let pasteboardWasEmpty = NSPasteboard.general.pasteboardItems?.isEmpty != false
@@ -137,12 +216,11 @@ final class AccessibilityService {
             }
         }
 
-        try validateTarget(snapshot)
+        try await ensureSelectionReady(snapshot)
 
         guard let source = CGEventSource(stateID: .hidSystemState),
               let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
               let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false) else {
-            copyToPasteboard(replacement)
             throw PolishPopError.replacementFailed
         }
         keyDown.flags = .maskCommand
@@ -150,7 +228,10 @@ final class AccessibilityService {
         keyDown.postToPid(snapshot.targetPID)
         keyUp.postToPid(snapshot.targetPID)
 
-        try await Task.sleep(nanoseconds: 500_000_000)
+        let landed = await waitForPasteToLand(snapshot)
+
+        // Deliberately not `try await`: a cancellation here must not restore the clipboard out
+        // from under an application that has not finished reading the paste.
         restorePasteboard(
             savedItems,
             wasEmpty: pasteboardWasEmpty,
@@ -158,132 +239,154 @@ final class AccessibilityService {
             expectedChangeCount: replacementChangeCount
         )
         needsRestore = false
+
+        guard landed else { throw PolishPopError.replacementFailed }
     }
 
-    func replaceFromReview(
-        _ snapshot: SelectionSnapshot,
-        with replacement: String,
-        allowClipboardFallback: Bool
-    ) async throws {
-        guard let targetApplication = snapshot.targetApplication,
-              !targetApplication.isTerminated else {
-            throw PolishPopError.selectionChanged
-        }
+    /// Watches the target field until the paste visibly takes effect, instead of assuming it did
+    /// after a fixed 500 ms. A fast application finishes in a fraction of that; a slow one used to
+    /// have its clipboard pulled away mid-paste.
+    ///
+    /// `validateTarget` has just read this field's selected text successfully, so a read that now
+    /// returns nothing means the selection collapsed — which is what a paste does.
+    private func waitForPasteToLand(_ snapshot: SelectionSnapshot) async -> Bool {
+        let box = AXElementBox(snapshot.element)
+        let originalText = snapshot.text
 
-        if NSWorkspace.shared.frontmostApplication?.processIdentifier != snapshot.targetPID {
-            targetApplication.activate(options: [.activateIgnoringOtherApps])
-            try await Task.sleep(nanoseconds: 180_000_000)
-        }
-
-        try await replace(
-            snapshot,
-            with: replacement,
-            allowClipboardFallback: allowClipboardFallback,
-            forcePaste: true
-        )
-    }
-
-    func copyToPasteboard(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-    }
-
-    private func selectedText(in element: AXUIElement) -> String? {
-        var selectedValue: CFTypeRef?
-        let status = AXUIElementCopyAttributeValue(
-            element,
-            kAXSelectedTextAttribute as CFString,
-            &selectedValue
-        )
-        guard status == .success else { return nil }
-        return selectedValue as? String
-    }
-
-    private func selectedRange(in element: AXUIElement) -> CFRange? {
-        var rangeValue: CFTypeRef?
-        let status = AXUIElementCopyAttributeValue(
-            element,
-            kAXSelectedTextRangeAttribute as CFString,
-            &rangeValue
-        )
-        guard status == .success,
-              let rangeValue,
-              CFGetTypeID(rangeValue) == AXValueGetTypeID() else {
-            return nil
-        }
-        let axValue = unsafeDowncast(rangeValue, to: AXValue.self)
-        guard AXValueGetType(axValue) == .cfRange else { return nil }
-        var range = CFRange()
-        return AXValueGetValue(axValue, .cfRange, &range) ? range : nil
-    }
-
-    private func isSecureTextField(_ element: AXUIElement) -> Bool {
-        var subroleValue: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-            element,
-            kAXSubroleAttribute as CFString,
-            &subroleValue
-        ) == .success,
-              let subrole = subroleValue as? String else {
-            return false
-        }
-        return subrole == (kAXSecureTextFieldSubrole as String)
-    }
-
-    private func containsProtectedContent(_ element: AXUIElement) -> Bool {
-        var current: AXUIElement? = element
-
-        for _ in 0..<8 {
-            guard let candidate = current else { return false }
-            AXUIElementSetMessagingTimeout(candidate, 0.2)
-            var protectedValue: CFTypeRef?
-            if AXUIElementCopyAttributeValue(
-                candidate,
-                "AXContainsProtectedContent" as CFString,
-                &protectedValue
-            ) == .success,
-               let protected = protectedValue as? NSNumber,
-               protected.boolValue {
-                return true
+        for _ in 0..<24 {
+            await settle(40_000_000)
+            let observed = await AXQueue.shared.run {
+                AXReader.selectedText(in: box.element)
             }
-
-            var parentValue: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(
-                candidate,
-                kAXParentAttribute as CFString,
-                &parentValue
-            ) == .success,
-                  let parentValue,
-                  CFGetTypeID(parentValue) == AXUIElementGetTypeID() else {
-                return false
-            }
-            current = unsafeDowncast(parentValue, to: AXUIElement.self)
+            guard let text = observed else { return true }
+            if text != originalText { return true }
         }
         return false
     }
 
-    private func validateTarget(_ snapshot: SelectionSnapshot) throws {
+    /// A delay that cancellation cannot skip.
+    ///
+    /// `Task.sleep` returns immediately once the surrounding task is cancelled, which would let
+    /// the clipboard be restored out from under an application still processing the paste.
+    private func settle(_ nanoseconds: UInt64) async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated)
+                .asyncAfter(deadline: .now() + .nanoseconds(Int(nanoseconds))) {
+                    continuation.resume()
+                }
+        }
+    }
+
+    /// Runs the ancestor scan for DRM-protected containers on a snapshot that came from the cheap
+    /// probe, so text captured by the sparkle button gets the same check as the shortcut path.
+    func assertNotProtected(_ snapshot: SelectionSnapshot) async throws {
+        let box = AXElementBox(snapshot.element)
+        let timeout = Self.captureTimeout
+        let isProtected = await AXQueue.shared.run {
+            AXReader.isSecureTextField(box.element)
+                || AXReader.containsProtectedContent(box.element, timeout: timeout)
+        }
+        if isProtected {
+            throw PolishPopError.protectedTextField
+        }
+    }
+
+    // MARK: - Internals
+
+    private func snapshot(from reading: AXSelectionReading) -> SelectionSnapshot {
+        SelectionSnapshot(
+            text: reading.text,
+            element: reading.element,
+            targetPID: reading.pid,
+            selectedRange: reading.range,
+            targetApplication: NSRunningApplication(processIdentifier: reading.pid),
+            isReplaceable: reading.isReplaceable
+        )
+    }
+
+    /// Polls briefly instead of sleeping a fixed interval, so a fast application is not made to
+    /// wait for a slow one's worst case.
+    private func waitForFrontmost(pid: pid_t) async throws {
+        for _ in 0..<60 {
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == pid { return }
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+    }
+
+    /// Makes sure the field is focused and holds exactly the text the user reviewed, restoring the
+    /// selection if the application dropped it.
+    ///
+    /// Many editors — Electron and web-based ones especially — collapse their selection the moment
+    /// they lose focus, which the review panel necessarily takes. Demanding an untouched selection
+    /// therefore refused to apply in exactly the apps people use most. Re-selecting the recorded
+    /// range keeps the safety property intact: nothing is written unless the text now selected is
+    /// character-for-character the text the user approved.
+    private func ensureSelectionReady(_ snapshot: SelectionSnapshot) async throws {
         guard NSWorkspace.shared.frontmostApplication?.processIdentifier == snapshot.targetPID else {
+            Diagnostics.log("apply: wrong frontmost app")
             throw PolishPopError.selectionChanged
         }
 
-        let systemWide = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(systemWide, 0.4)
-        var focusedValue: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-            systemWide,
-            kAXFocusedUIElementAttribute as CFString,
-            &focusedValue
-        ) == .success,
-              let focusedValue,
-              CFGetTypeID(focusedValue) == AXUIElementGetTypeID(),
-              CFEqual(focusedValue, snapshot.element),
-              selectedText(in: snapshot.element) == snapshot.text,
-              let currentRange = selectedRange(in: snapshot.element),
-              currentRange.location == snapshot.selectedRange.location,
-              currentRange.length == snapshot.selectedRange.length else {
+        let box = AXElementBox(snapshot.element)
+        let expectedText = snapshot.text
+        let expectedRange = snapshot.selectedRange
+        let timeout = Self.captureTimeout
+
+        let outcome = await AXQueue.shared.run { () -> SelectionReadiness in
+            // The element may still carry the probe's short messaging timeout from when the
+            // sparkle was offered; applying is deliberate work and gets the longer budget.
+            AXUIElementSetMessagingTimeout(box.element, timeout)
+
+            let focused = AXReader.focusedElement(timeout: timeout)
+            let isFocused = focused.map { CFEqual($0.element, box.element) } ?? false
+
+            if isFocused,
+               AXReader.selectedText(in: box.element) == expectedText,
+               let currentRange = AXReader.selectedRange(in: box.element),
+               currentRange.location == expectedRange.location,
+               currentRange.length == expectedRange.length {
+                return .intact
+            }
+
+            if !isFocused {
+                // Ask the field for focus back before touching its selection.
+                _ = AXUIElementSetAttributeValue(
+                    box.element,
+                    kAXFocusedAttribute as CFString,
+                    kCFBooleanTrue
+                )
+            }
+
+            guard AXReader.setSelectedRange(element: box.element, range: expectedRange, timeout: timeout) else {
+                return .unrecoverable
+            }
+            // The decisive check: only the exact reviewed text may be replaced.
+            guard AXReader.selectedText(in: box.element) == expectedText else {
+                return .textNoLongerMatches
+            }
+            return .restored
+        }
+
+        switch outcome {
+        case .intact:
+            return
+        case .restored:
+            Diagnostics.log("apply: selection was dropped by the app and re-selected")
+            return
+        case .textNoLongerMatches:
+            Diagnostics.log("apply: text at the recorded range no longer matches")
+            throw PolishPopError.selectionChanged
+        case .unrecoverable:
+            Diagnostics.log("apply: field would not accept a selection range")
             throw PolishPopError.selectionChanged
         }
+    }
+
+    private enum SelectionReadiness {
+        case intact
+        case restored
+        case textNoLongerMatches
+        case unrecoverable
     }
 
     private func clonePasteboardItems(_ items: [NSPasteboardItem]?) -> [NSPasteboardItem] {

@@ -5,7 +5,7 @@ SCRIPT_DIR="${0:A:h}"
 PROJECT_ROOT="${SCRIPT_DIR:h}"
 OUTPUT_DIR="${1:-${PROJECT_ROOT:h:h}/outputs}"
 APP_PATH="${OUTPUT_DIR}/PolishPop.app"
-ZIP_PATH="${OUTPUT_DIR}/PolishPop-0.4.1.zip"
+ZIP_PATH="${OUTPUT_DIR}/PolishPop-0.5.0.zip"
 CACHE_DIR="${PROJECT_ROOT}/.cache"
 
 if [[ -d /Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk ]]; then
@@ -21,6 +21,7 @@ SWIFTPM_MODULECACHE_OVERRIDE="$CACHE_DIR/swiftpm" \
 swift build --disable-sandbox --sdk "$SDK_PATH" -c release --package-path "$PROJECT_ROOT"
 
 "$PROJECT_ROOT/.build/release/PolishPop" --self-test
+"$PROJECT_ROOT/.build/release/PolishPop" --render-ui "${OUTPUT_DIR}/ui-render"
 "$PROJECT_ROOT/.build/release/PolishPop" --codex-smoke-test
 "$PROJECT_ROOT/.build/release/PolishPop" --polish-smoke-test
 
@@ -30,7 +31,22 @@ swift build --disable-sandbox --sdk "$SDK_PATH" -c release --package-path "$PROJ
 /bin/cp "$PROJECT_ROOT/.build/release/PolishPop" "$APP_PATH/Contents/MacOS/PolishPop"
 /bin/cp "$PROJECT_ROOT/Support/Info.plist" "$APP_PATH/Contents/Info.plist"
 /bin/cp "$PROJECT_ROOT/Support/PolishPop.icns" "$APP_PATH/Contents/Resources/PolishPop.icns"
-/usr/bin/codesign --force --deep --sign - "$APP_PATH"
+# Prefer a stable signing identity over ad-hoc.
+#
+# An ad-hoc signature's designated requirement is the code hash, so it changes on every build and
+# macOS discards the app's Accessibility permission each time. Signing with a certificate makes the
+# requirement `identifier ... and certificate leaf = H"..."`, which survives rebuilds — the user
+# grants Accessibility once instead of after every packaging run.
+SIGN_IDENTITY="PolishPop Self-Signed"
+if /usr/bin/security find-certificate -c "$SIGN_IDENTITY" >/dev/null 2>&1; then
+    /usr/bin/codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_PATH"
+    echo "signed with: $SIGN_IDENTITY"
+else
+    /usr/bin/codesign --force --deep --sign - "$APP_PATH"
+    echo "WARNING: '$SIGN_IDENTITY' not found; fell back to ad-hoc signing."
+    echo "         Accessibility permission will need re-granting after every build."
+    echo "         See 'Stable code signing' in README.md."
+fi
 /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_PATH"
 
 echo "$ZIP_PATH"

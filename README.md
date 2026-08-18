@@ -1,16 +1,64 @@
-# PolishPop 0.4.1
+# PolishPop 0.5.0
 
 PolishPop is a personal macOS menu-bar app that polishes selected text through the official Codex App Server and ChatGPT-managed OAuth.
 
 ## What it does
 
-- Shows a sparkle button after you select editable text.
+- Shows a sparkle button beside the text you just selected.
 - Polishes the selection with a Professional, Natural, Friendly, Concise, or Executive tone.
+- Opens a review panel that highlights, word by word, exactly what the rewrite changed.
 - Replaces the original selection in place when the target app supports it.
-- Provides `⌥⌘P` as a global keyboard shortcut.
+- Offers a configurable shortcut (`⌥⌘P` by default) and an optional instant-replace shortcut with undo.
+- Speaks English and 简体中文, following the system language by default.
 - Signs in through the official Codex-managed ChatGPT OAuth browser flow.
 - Uses the Codex allowance or credits included with an eligible ChatGPT plan—no OpenAI API key or separate API billing.
 - Rejects secure/protected fields and revalidates the exact app, field, range, and text before replacement.
+
+## What is new in 0.5.0
+
+This release is a usability pass over the whole app.
+
+**Nothing interrupts you.** Errors used to be modal alerts that activated PolishPop and pulled focus
+out of whatever you were typing in — a stray `⌥⌘P` with no selection was enough to do it. Every
+routine message is now a small non-activating toast beside your cursor, with a relevant action button
+(Open Settings, Undo) where one helps.
+
+**The wait is visible and interruptible.** The review panel now opens the moment you click the
+sparkle, showing your original with the draft still being written, plus **Stop**. Previously you
+watched a 38-point spinner with no way to cancel and a 90-second ceiling.
+
+**You can see what changed.** The panel diffs the original against the draft and highlights
+insertions in the draft and deletions in the original, word by word for Latin text and character by
+character for Chinese. Character and word deltas are shown alongside.
+
+**Keyboard-complete.** `⌘↩` replaces, `⇧⌘C` copies, `⌘R` regenerates, `⎋` cancels, `⌘.` stops
+generation. `Return` inserts a paragraph break instead of firing Replace. A real Edit menu makes
+`⌘C`/`⌘V`/`⌘X`/`⌘A`/`⌘Z` work inside the draft editor, which they previously did not.
+
+**It stops working when you are not.** The sparkle button is anchored to the selection rectangle
+rather than the mouse pointer, disappears when you switch to another application, and auto-hides
+after 15 seconds instead of floating over every Space until your next click.
+
+**It costs far less while idle.** The selection monitor used to make a blocking, cross-process
+Accessibility query on the main thread after *every* left-click and every Shift keystroke anywhere on
+the system, with up to 2 seconds of worst-case messaging timeouts. It now runs those queries on a
+background queue and only after a gesture that can actually create a selection — a drag, a
+double-click, Shift-navigation, or `⌘A`.
+
+**Instant replace, with a way back.** Turn on the optional instant-replace shortcut to skip the review
+panel entirely. PolishPop keeps your original wording and offers **Undo** in the toast and in the
+menu-bar menu, which reselects what it wrote and puts your words back.
+
+**Settings apply immediately.** The Save button is gone — changes take effect as you make them.
+The model is now a menu of what your plan actually offers rather than a free-text field where a typo
+silently fell back to a different model. Shortcuts are recordable, Accessibility permission is
+detected while you grant it without relaunching, and there are Launch at Login, Hide Dock Icon and
+language options.
+
+**Direct replacement is tried first.** Apply previously always went through the clipboard. It now
+attempts a verified direct Accessibility write and only falls back to a temporary paste when the
+target application refuses or silently ignores it — and that paste is now confirmed to have landed
+before your clipboard is restored, instead of after a fixed 500 ms guess.
 
 ## Important account boundary
 
@@ -35,7 +83,7 @@ The version packaged here was built and smoke-tested against `codex-cli 0.147.0`
 
 ## Install
 
-1. Unzip `PolishPop-0.4.1.zip`.
+1. Unzip `PolishPop-0.5.0.zip`.
 2. Move `PolishPop.app` to `/Applications`.
 3. Open it. Because this personal MVP is ad-hoc signed rather than notarized, macOS may require Control-click → **Open** the first time.
 4. Click **Sign in with ChatGPT** and complete the OpenAI browser authorization.
@@ -91,12 +139,56 @@ The icon is original PolishPop artwork and intentionally contains no Apple, Open
 
 ## Mac App Store status
 
-Version 0.4.1 is **not ready for Mac App Store submission**. It remains a direct-download MVP for two architectural reasons:
+Version 0.5.0 is **not ready for Mac App Store submission**. It remains a direct-download MVP for two architectural reasons:
 
 1. Apple requires Mac App Store apps to enable App Sandbox, while Apple documents the use of Accessibility APIs in assistive apps as incompatible with App Sandbox: <https://developer.apple.com/documentation/security/protecting-user-data-with-app-sandbox>
 2. Mac App Store apps must be self-contained. This MVP depends on a separately installed, OpenAI-signed Codex CLI. Apple’s review guidelines require apps to be appropriately sandboxed, packaged through Xcode, and submitted as a single self-contained bundle: <https://developer.apple.com/app-store/review/guidelines/>
 
 An App Store edition therefore needs a different interaction model, such as an `NSServices`/Share-extension workflow where the host app explicitly hands selected text to PolishPop, plus a bundled and licensed inference/OAuth component. That edition would not be able to display the current universal floating button through Accessibility.
+
+## Stable code signing
+
+`scripts/package_app.sh` signs with a local certificate named **PolishPop Self-Signed** when one is
+present in the login keychain, and falls back to ad-hoc signing with a warning when it is not.
+
+This matters for permissions rather than for distribution. An ad-hoc signature's designated
+requirement is the code hash:
+
+```
+designated => cdhash H"d898c5bc..."
+```
+
+That hash changes on every build, so macOS treats each build as a different application and discards
+the Accessibility permission — the stale entry stays visible in System Settings but no longer
+matches, and toggling it off and on does not help; it has to be removed and re-added. Signing with a
+certificate produces a requirement that survives rebuilds:
+
+```
+designated => identifier "com.demry.polishpop" and certificate leaf = H"1c68d4b2..."
+```
+
+Accessibility is then granted once and keeps working across builds.
+
+To create the certificate on a new machine, either use Keychain Access → Certificate Assistant →
+Create a Certificate (name it `PolishPop Self-Signed`, identity type Self Signed Root, certificate
+type Code Signing), or from the command line:
+
+```sh
+openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -keyout key.pem -out cert.pem \
+  -subj "/CN=PolishPop Self-Signed" \
+  -addext "basicConstraints=critical,CA:false" \
+  -addext "keyUsage=critical,digitalSignature" \
+  -addext "extendedKeyUsage=critical,codeSigning"
+openssl pkcs12 -export -legacy -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 \
+  -in cert.pem -inkey key.pem -name "PolishPop Self-Signed" -out polishpop.p12 -passout pass:TRANSIENT
+security import polishpop.p12 -k ~/Library/Keychains/login.keychain-db -P TRANSIENT -T /usr/bin/codesign
+rm -f key.pem polishpop.p12   # the private key now lives in the keychain
+```
+
+`security find-identity -v -p codesigning` will still report zero valid identities, because a
+self-signed certificate is untrusted for *verification*. That does not prevent *signing*, and the
+designated requirement it produces is what PolishPop needs. This is not a substitute for a Developer
+ID certificate and notarization; Gatekeeper still treats the app as unidentified.
 
 ## Build from source
 
@@ -107,9 +199,35 @@ An App Store edition therefore needs a different interaction model, such as an `
 The packaging script:
 
 1. builds the Swift 6 release executable;
-2. runs seven deterministic protocol/prompt checks;
-3. performs a live local Codex app-server initialization/account smoke test without opening OAuth;
-4. creates and ad-hoc signs `PolishPop.app`;
-5. archives the app as `PolishPop-0.4.1.zip`.
+2. runs 106 deterministic checks covering the Codex protocol, prompts, the diff engine, text
+   statistics, shortcut encoding, and translation completeness;
+3. renders every screen in both languages to PNG for visual inspection;
+4. performs a live local Codex app-server initialization/account smoke test without opening OAuth;
+5. creates and ad-hoc signs `PolishPop.app`;
+6. archives the app as `PolishPop-0.5.0.zip`.
+
+Two development-only modes help review the interface without a Codex account:
+
+```sh
+./.build/release/PolishPop --render-ui /tmp/polishpop-ui   # every screen, both languages, as PNG
+./.build/release/PolishPop --window-probe                  # reports the frames macOS gives the panels
+```
+
+Two more exist for support:
+
+```sh
+/Applications/PolishPop.app/Contents/MacOS/PolishPop --diagnose
+open -a /Applications/PolishPop.app --args --debug-log   # then read ~/Library/Application Support/PolishPop/debug.log
+```
+
+`--diagnose` prints permission, shortcut, and Codex-CLI state. Note that macOS attributes
+Accessibility permission to the process *responsible* for the launch, so running it from a terminal
+that itself holds Accessibility permission reports a false positive; `--debug-log` is authoritative
+because the app must be started by LaunchServices for the flag to reach it. The debug log records
+whether a selection was seen and how long it was, never its contents.
+
+`--render-ui` draws into offscreen windows, so it needs no Screen Recording permission and never
+flashes anything on the display. `--window-probe` exists because offscreen rendering cannot catch a
+window that AppKit sizes differently from the view it contains.
 
 The package contains no third-party Swift dependencies and never embeds an API key or OAuth token.

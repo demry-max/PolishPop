@@ -1,36 +1,70 @@
 import AppKit
+import Carbon.HIToolbox
 
+/// Watches for gestures that plausibly *create* a text selection and probes Accessibility only
+/// then.
+///
+/// The previous version probed after every left-mouse-up anywhere on the system, which meant a
+/// blocking Accessibility round trip for every click the user made all day. Now a plain click
+/// simply hides the button — it collapses the selection anyway — and only drags, multi-clicks and
+/// selection keystrokes pay for a probe.
 @MainActor
 final class SelectionMonitor {
-    typealias SelectionHandler = (SelectionSnapshot, NSPoint) -> Void
+    typealias SelectionHandler = (SelectionSnapshot) -> Void
 
     var onSelection: SelectionHandler?
     var onSelectionCleared: (() -> Void)?
+
+    /// Pointer travel, in points, above which a mouse-up is treated as a drag-select.
+    private static let dragThreshold: CGFloat = 4
+    private static let debounce: UInt64 = 110_000_000
+
     private let accessibility: AccessibilityService
-    private var mouseMonitor: Any?
-    private var keyMonitor: Any?
+    private var monitors: [Any] = []
     private var pendingCapture: Task<Void, Never>?
+    private var mouseDownLocation: NSPoint?
+    private var lastDelivered: SelectionSnapshot?
 
     init(accessibility: AccessibilityService) {
         self.accessibility = accessibility
     }
 
     func start() {
-        guard mouseMonitor == nil else { return }
+        guard monitors.isEmpty else { return }
 
-        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.scheduleCapture(anchor: NSEvent.mouseLocation)
+        add(matching: .leftMouseDown) { [weak self] _ in
+            // Screen coordinates, not `event.locationInWindow`: a global monitor's events have no
+            // window, so window-relative coordinates are not comparable between the down and the
+            // up — and an under-measured drag reads as a plain click, which hides the button
+            // instead of offering it.
+            self?.mouseDownLocation = NSEvent.mouseLocation
+        }
+
+        add(matching: .leftMouseUp) { [weak self] event in
+            guard let self else { return }
+            let start = mouseDownLocation
+            mouseDownLocation = nil
+            let end = NSEvent.mouseLocation
+            let travelled = start.map { hypot($0.x - end.x, $0.y - end.y) } ?? .greatestFiniteMagnitude
+            let isDragSelect = travelled > Self.dragThreshold
+            let isMultiClick = event.clickCount >= 2
+            let isShiftExtend = event.modifierFlags.contains(.shift)
+            if isDragSelect || isMultiClick || isShiftExtend {
+                Diagnostics.log("mouseUp: probing (travelled=\(Int(travelled)) clicks=\(event.clickCount) shift=\(isShiftExtend))")
+                scheduleCapture()
+            } else {
+                Diagnostics.log("mouseUp: plain click, clearing")
+                clear()
             }
         }
 
-        keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyUp]) { [weak self] event in
-            let isShiftSelection = event.modifierFlags.contains(.shift)
-            let isSelectAll = event.modifierFlags.contains(.command)
-                && event.charactersIgnoringModifiers?.lowercased() == "a"
-            guard isShiftSelection || isSelectAll else { return }
-            Task { @MainActor [weak self] in
-                self?.scheduleCapture(anchor: NSEvent.mouseLocation)
+        add(matching: .keyUp) { [weak self] event in
+            guard let self else { return }
+            if Self.isSelectionKeystroke(event) {
+                Diagnostics.log("keyUp: selection keystroke, probing")
+                scheduleCapture()
+            } else if Self.isDismissingKeystroke(event) {
+                clear()
             }
         }
     }
@@ -38,31 +72,85 @@ final class SelectionMonitor {
     func stop() {
         pendingCapture?.cancel()
         pendingCapture = nil
-        if let mouseMonitor {
-            NSEvent.removeMonitor(mouseMonitor)
-            self.mouseMonitor = nil
+        mouseDownLocation = nil
+        lastDelivered = nil
+        for monitor in monitors {
+            NSEvent.removeMonitor(monitor)
         }
-        if let keyMonitor {
-            NSEvent.removeMonitor(keyMonitor)
-            self.keyMonitor = nil
-        }
+        monitors.removeAll()
     }
 
-    func captureNow(anchor: NSPoint = NSEvent.mouseLocation) {
-        do {
-            let snapshot = try accessibility.currentSelection()
-            onSelection?(snapshot, anchor)
-        } catch {
-            onSelectionCleared?()
-        }
+    /// Forgets the selection currently on screen so the next probe is delivered even if the user
+    /// re-selects exactly the same text.
+    func invalidateDeliveredSelection() {
+        lastDelivered = nil
     }
 
-    private func scheduleCapture(anchor: NSPoint) {
+    // MARK: - Internals
+
+    private func add(matching mask: NSEvent.EventTypeMask, handler: @escaping @MainActor (NSEvent) -> Void) {
+        guard let monitor = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { event in
+            MainActor.assumeIsolated { handler(event) }
+        }) else {
+            return
+        }
+        monitors.append(monitor)
+    }
+
+    private func clear() {
+        pendingCapture?.cancel()
+        pendingCapture = nil
+        guard lastDelivered != nil else { return }
+        lastDelivered = nil
+        onSelectionCleared?()
+    }
+
+    private func scheduleCapture() {
         pendingCapture?.cancel()
         pendingCapture = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 140_000_000)
+            try? await Task.sleep(nanoseconds: Self.debounce)
             guard !Task.isCancelled else { return }
-            self?.captureNow(anchor: anchor)
+            await self?.captureNow()
         }
+    }
+
+    private func captureNow() async {
+        let snapshot = await accessibility.probeSelection()
+        Diagnostics.log("probe result: \(snapshot == nil ? "nil" : "length=\(snapshot!.text.count)")")
+        // The probe suspends; by the time it answers the monitor may have been stopped, and
+        // delivering a selection then would put the button back on screen after the user turned
+        // it off.
+        guard !monitors.isEmpty, !Task.isCancelled else { return }
+        guard let snapshot else {
+            clear()
+            return
+        }
+        // Re-showing an identical selection would make the button jump for no reason.
+        if let lastDelivered, snapshot.matchesLocation(of: lastDelivered) { return }
+        lastDelivered = snapshot
+        onSelection?(snapshot)
+    }
+
+    private static func isSelectionKeystroke(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags
+        if flags.contains(.command), event.charactersIgnoringModifiers?.lowercased() == "a" {
+            return true
+        }
+        guard flags.contains(.shift) else { return false }
+        let navigationKeys: Set<UInt16> = [
+            UInt16(kVK_LeftArrow), UInt16(kVK_RightArrow),
+            UInt16(kVK_UpArrow), UInt16(kVK_DownArrow),
+            UInt16(kVK_Home), UInt16(kVK_End),
+            UInt16(kVK_PageUp), UInt16(kVK_PageDown)
+        ]
+        return navigationKeys.contains(event.keyCode)
+    }
+
+    /// Typing, deleting or moving the caret destroys the selection, so the button should go
+    /// away. Command and Control shortcuts are excluded because Copy, Save and friends leave the
+    /// selection exactly where it was.
+    private static func isDismissingKeystroke(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags
+        return !flags.contains(.shift) && !flags.contains(.command) && !flags.contains(.control)
     }
 }

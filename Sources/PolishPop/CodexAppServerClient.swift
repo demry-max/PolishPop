@@ -28,9 +28,14 @@ actor CodexAppServerClient {
     private var inputHandle: FileHandle?
     private var outputHandle: FileHandle?
     private var errorHandle: FileHandle?
-    private var outputReadTask: Task<Void, Never>?
-    private var errorReadTask: Task<Void, Never>?
     private var readBuffer = Data()
+    private var outputContinuation: AsyncStream<Data>.Continuation?
+    private var errorContinuation: AsyncStream<Data>.Continuation?
+    private var pumpTasks: [Task<Void, Never>] = []
+    /// Tail of the subprocess's stderr, kept so an unmodelled failure is diagnosable instead of
+    /// silently discarded.
+    private var standardErrorTail = Data()
+    private static let standardErrorTailLimit = 4_096
     private var nextRequestId = 1
     private var pendingRequests: [Int: PendingRequest] = [:]
     private var loginWaiters: [String: LoginWaiter] = [:]
@@ -38,7 +43,14 @@ actor CodexAppServerClient {
     private var startupTask: Task<Void, Error>?
     private var initialized = false
     private var cachedModels: [String] = []
+    private var cachedDefaultModel: String?
+    private var cachedAccount: CodexAccount?
+    private var cachedAccountReadAt: Date?
     private var processGeneration = 0
+
+    /// How long a successful `account/read` stays trusted. Re-reading it before every rewrite
+    /// added a full round trip to the one operation the user is waiting on.
+    private static let accountCacheLifetime: TimeInterval = 300
 
     deinit {
         process?.terminate()
@@ -51,7 +63,28 @@ actor CodexAppServerClient {
             params: .object(["refreshToken": .bool(false)]),
             timeoutSeconds: 15
         )
-        return Self.parseAccount(from: result)
+        let account = Self.parseAccount(from: result)
+        cachedAccount = account
+        cachedAccountReadAt = Date()
+        return account
+    }
+
+    /// Account state that avoids a round trip when it was confirmed moments ago.
+    private func cachedOrFreshAccount() async throws -> CodexAccount? {
+        if let cachedAccount,
+           let cachedAccountReadAt,
+           Date().timeIntervalSince(cachedAccountReadAt) < Self.accountCacheLifetime,
+           initialized,
+           process?.isRunning == true {
+            return cachedAccount
+        }
+        return try await account()
+    }
+
+    /// The models the signed-in plan actually offers, for the Settings model picker.
+    func availableModels() async throws -> (models: [String], defaultModel: String?) {
+        try await loadModelsIfNeeded()
+        return (cachedModels, cachedDefaultModel)
     }
 
     func beginChatGPTLogin() async throws -> CodexLoginSession {
@@ -106,11 +139,15 @@ actor CodexAppServerClient {
     }
 
     func cancelLogin(_ loginId: String) async {
-        _ = try? await request(
-            method: "account/login/cancel",
-            params: .object(["loginId": .string(loginId)]),
-            timeoutSeconds: 10
-        )
+        // Only worth telling a server that is already running; starting one to cancel a login
+        // would be an absurd side effect of the user pressing Cancel.
+        if initialized, process?.isRunning == true {
+            _ = try? await requestWithoutStarting(
+                method: "account/login/cancel",
+                params: .object(["loginId": .string(loginId)]),
+                timeoutSeconds: 10
+            )
+        }
         resolveLogin(loginId: loginId, result: .failure(.loginFailed("Cancelled")))
     }
 
@@ -122,6 +159,9 @@ actor CodexAppServerClient {
             timeoutSeconds: 15
         )
         cachedModels = []
+        cachedDefaultModel = nil
+        cachedAccount = nil
+        cachedAccountReadAt = nil
         let verification = try await requestWithoutStarting(
             method: "account/read",
             params: .object(["refreshToken": .bool(false)]),
@@ -138,7 +178,7 @@ actor CodexAppServerClient {
         purpose: PolishPurpose,
         model: String
     ) async throws -> String {
-        guard try await account() != nil else {
+        guard try await cachedOrFreshAccount() != nil else {
             throw CodexClientError.notAuthenticated
         }
 
@@ -233,10 +273,7 @@ actor CodexAppServerClient {
 
     func stop() async {
         processGeneration += 1
-        outputReadTask?.cancel()
-        errorReadTask?.cancel()
-        outputReadTask = nil
-        errorReadTask = nil
+        tearDownPipes()
         try? inputHandle?.close()
 
         let processToStop = process
@@ -292,6 +329,7 @@ actor CodexAppServerClient {
         processGeneration += 1
         let generation = processGeneration
         readBuffer.removeAll(keepingCapacity: false)
+        standardErrorTail.removeAll(keepingCapacity: false)
 
         let process = Process()
         let inputPipe = Pipe()
@@ -351,20 +389,46 @@ actor CodexAppServerClient {
             throw CodexClientError.processLaunchFailed(error.localizedDescription)
         }
 
-        let orderedOutputHandle = outputPipe.fileHandleForReading
-        outputReadTask = Task.detached { [weak self] in
-            while !Task.isCancelled {
-                let data = orderedOutputHandle.availableData
-                guard !data.isEmpty else { return }
-                await self?.consume(data, generation: generation)
+        // `readabilityHandler` lets GCD do the waiting, and each pipe feeds a single AsyncStream
+        // consumer. Spawning one unstructured Task per chunk would be wrong: unstructured tasks
+        // have no ordering guarantee, so two chunks of one JSON-RPC frame could reach the actor
+        // reversed, corrupting the line framing and killing the subprocess.
+        let (outputStream, outputSink) = Self.makeChunkStream()
+        let (errorStream, errorSink) = Self.makeChunkStream()
+        outputContinuation = outputSink
+        errorContinuation = errorSink
+
+        outputPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty else {
+                handle.readabilityHandler = nil
+                outputSink.finish()
+                return
             }
+            outputSink.yield(data)
         }
-        let orderedErrorHandle = errorPipe.fileHandleForReading
-        errorReadTask = Task.detached {
-            while !Task.isCancelled {
-                guard !orderedErrorHandle.availableData.isEmpty else { return }
+        errorPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty else {
+                handle.readabilityHandler = nil
+                errorSink.finish()
+                return
             }
+            errorSink.yield(data)
         }
+
+        pumpTasks = [
+            Task { [weak self] in
+                for await chunk in outputStream {
+                    await self?.consume(chunk, generation: generation)
+                }
+            },
+            Task { [weak self] in
+                for await chunk in errorStream {
+                    await self?.appendStandardError(chunk, generation: generation)
+                }
+            }
+        ]
 
         do {
             _ = try await requestWithoutStarting(
@@ -373,7 +437,7 @@ actor CodexAppServerClient {
                     "clientInfo": .object([
                         "name": .string("polishpop"),
                         "title": .string("PolishPop"),
-                        "version": .string("0.4.1")
+                        "version": .string(AppInfo.fallbackVersion)
                     ])
                 ]),
                 timeoutSeconds: 20
@@ -430,13 +494,54 @@ actor CodexAppServerClient {
         ]))
     }
 
+    /// Writing to a subprocess that has already exited raises SIGPIPE, which would take the whole
+    /// app down; the signal is ignored at startup and the resulting EPIPE surfaces as an error.
     private func send(_ value: JSONValue) throws {
         guard let inputHandle, process?.isRunning == true else {
             throw CodexClientError.processTerminated
         }
         var data = try JSONEncoder().encode(value)
         data.append(0x0A)
-        try inputHandle.write(contentsOf: data)
+        do {
+            try inputHandle.write(contentsOf: data)
+        } catch {
+            throw CodexClientError.processTerminated
+        }
+    }
+
+    /// `AsyncStream.Continuation` is `Sendable` and its `yield` preserves call order, which is
+    /// exactly the guarantee the JSON-RPC line framing depends on.
+    private static func makeChunkStream() -> (AsyncStream<Data>, AsyncStream<Data>.Continuation) {
+        var sink: AsyncStream<Data>.Continuation!
+        let stream = AsyncStream<Data> { sink = $0 }
+        return (stream, sink)
+    }
+
+    private func tearDownPipes() {
+        outputHandle?.readabilityHandler = nil
+        errorHandle?.readabilityHandler = nil
+        outputContinuation?.finish()
+        errorContinuation?.finish()
+        outputContinuation = nil
+        errorContinuation = nil
+        for task in pumpTasks {
+            task.cancel()
+        }
+        pumpTasks.removeAll()
+    }
+
+    private func appendStandardError(_ data: Data, generation: Int) {
+        guard generation == processGeneration else { return }
+        standardErrorTail.append(data)
+        if standardErrorTail.count > Self.standardErrorTailLimit {
+            standardErrorTail.removeFirst(standardErrorTail.count - Self.standardErrorTailLimit)
+        }
+    }
+
+    /// Last words from the Codex subprocess, for surfacing alongside a launch or protocol failure.
+    var standardErrorSummary: String {
+        String(data: standardErrorTail, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     private func consume(_ data: Data, generation: Int) async {
@@ -493,6 +598,9 @@ actor CodexAppServerClient {
             guard let loginId = params["loginId"]?.stringValue else { return }
             if params["success"]?.boolValue == true {
                 cachedModels = []
+                cachedDefaultModel = nil
+                cachedAccount = nil
+                cachedAccountReadAt = nil
                 resolveLogin(loginId: loginId, result: .success(()))
             } else {
                 let message = params["error"]?.stringValue ?? "Unknown sign-in error"
@@ -682,9 +790,10 @@ actor CodexAppServerClient {
         }
     }
 
+    /// Only records a result for a login somebody is actually waiting on; inventing a waiter for
+    /// an unknown id would leak an entry that nothing ever removes.
     private func resolveLogin(loginId: String, result: Result<Void, CodexClientError>) {
-        let waiter = loginWaiters[loginId] ?? LoginWaiter()
-        loginWaiters[loginId] = waiter
+        guard let waiter = loginWaiters[loginId] else { return }
         waiter.completion = result
         if let continuation = waiter.continuation {
             waiter.continuation = nil
@@ -715,17 +824,16 @@ actor CodexAppServerClient {
 
     private func processDidTerminate(status: Int32, generation: Int) {
         guard generation == processGeneration, process != nil else { return }
+        tearDownPipes()
         process = nil
         inputHandle = nil
         outputHandle = nil
         errorHandle = nil
-        outputReadTask?.cancel()
-        errorReadTask?.cancel()
-        outputReadTask = nil
-        errorReadTask = nil
         readBuffer.removeAll(keepingCapacity: false)
         initialized = false
         startupTask = nil
+        cachedAccount = nil
+        cachedAccountReadAt = nil
         failAll(CodexClientError.processTerminated)
     }
 
@@ -817,15 +925,16 @@ actor CodexAppServerClient {
         ]
         do {
             try versionProcess.run()
-            versionProcess.waitUntilExit()
         } catch {
             throw CodexClientError.cliIntegrityFailed
         }
+        // Read before waiting: a version banner large enough to fill the pipe buffer would
+        // otherwise deadlock the process against a full pipe nobody is draining.
+        let versionData = output.fileHandleForReading.readDataToEndOfFile()
+        versionProcess.waitUntilExit()
         guard versionProcess.terminationStatus == 0,
-              let versionText = String(
-                data: output.fileHandleForReading.readDataToEndOfFile(),
-                encoding: .utf8
-              )?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let versionText = String(data: versionData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
               let version = semanticVersion(in: versionText) else {
             throw CodexClientError.cliVersionUnsupported("unknown")
         }
@@ -874,28 +983,35 @@ actor CodexAppServerClient {
         )
     }
 
-    private func resolveModel(preferred: String) async throws -> String {
-        if cachedModels.isEmpty {
-            let result = try await request(
-                method: "model/list",
-                params: .object([
-                    "limit": .number(100),
-                    "includeHidden": .bool(false)
-                ]),
-                timeoutSeconds: 20
-            )
-            guard let models = result["data"]?.arrayValue else {
-                throw CodexClientError.malformedResponse
-            }
-            cachedModels = models.compactMap { $0["model"]?.stringValue }
-            if let defaultModel = models.first(where: { $0["isDefault"]?.boolValue == true })?["model"]?.stringValue,
-               !cachedModels.contains(defaultModel) {
-                cachedModels.insert(defaultModel, at: 0)
-            }
+    private func loadModelsIfNeeded() async throws {
+        guard cachedModels.isEmpty else { return }
+        let result = try await request(
+            method: "model/list",
+            params: .object([
+                "limit": .number(100),
+                "includeHidden": .bool(false)
+            ]),
+            timeoutSeconds: 20
+        )
+        guard let models = result["data"]?.arrayValue else {
+            throw CodexClientError.malformedResponse
         }
+        cachedModels = models.compactMap { $0["model"]?.stringValue }
+        let defaultModel = models.first(where: { $0["isDefault"]?.boolValue == true })?["model"]?.stringValue
+        cachedDefaultModel = defaultModel
+        if let defaultModel, !cachedModels.contains(defaultModel) {
+            cachedModels.insert(defaultModel, at: 0)
+        }
+    }
+
+    /// Falls back to the plan's own default rather than whichever model happened to be listed
+    /// first, which is what a user who never picked a model expects to get.
+    private func resolveModel(preferred: String) async throws -> String {
+        try await loadModelsIfNeeded()
 
         let normalized = preferred.trimmingCharacters(in: .whitespacesAndNewlines)
-        if cachedModels.contains(normalized) { return normalized }
+        if !normalized.isEmpty, cachedModels.contains(normalized) { return normalized }
+        if let cachedDefaultModel { return cachedDefaultModel }
         guard let fallback = cachedModels.first else {
             throw CodexClientError.generationFailed("No subscription model is currently available.")
         }
