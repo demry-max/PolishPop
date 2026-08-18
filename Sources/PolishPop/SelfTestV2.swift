@@ -22,6 +22,7 @@ enum SelfTest {
         checkTextStats(&results)
         checkShortcuts(&results)
         checkLocalization(&results)
+        checkSelectionGestures(&results)
 
         if results.failures.isEmpty {
             print("PolishPop self-test: \(results.total) checks passed")
@@ -172,6 +173,49 @@ enum SelfTest {
         let unknownShortcut = ShortcutDefinition(keyCode: 9_999, carbonModifiers: ShortcutDefinition.polishDefault.carbonModifiers)
         results.check(unknownShortcut.menuKeyEquivalentCharacter == nil, "unnameable key reports no menu equivalent")
         results.check(unknownShortcut.displayString.contains("9999"), "unnameable key still renders in the shortcut label")
+    }
+
+    // MARK: - Selection gestures
+
+    /// A mouse-up with no matching mouse-down is the normal case, not an edge case: a global
+    /// monitor sees nothing while PolishPop itself is frontmost. Treating it as a sentinel
+    /// distance once crashed the app on release builds, so the nil path is pinned here.
+    private static func checkSelectionGestures(_ results: inout Results) {
+        results.check(
+            SelectionMonitor.isSelectionGesture(travelled: nil, clickCount: 1, isShiftHeld: false),
+            "an unobserved mouse-down counts as a drag"
+        )
+        results.check(
+            SelectionMonitor.describe(nil) == "unknown",
+            "an unknown distance formats without a numeric conversion"
+        )
+        results.check(
+            SelectionMonitor.describe(.infinity) == "unknown",
+            "a non-finite distance formats without a numeric conversion"
+        )
+        results.check(SelectionMonitor.describe(12.4) == "12", "a real distance still formats")
+        results.check(
+            SelectionMonitor.isSelectionGesture(travelled: 40, clickCount: 1, isShiftHeld: false),
+            "a drag is a selection gesture"
+        )
+        results.check(
+            !SelectionMonitor.isSelectionGesture(travelled: 1, clickCount: 1, isShiftHeld: false),
+            "a plain click is not a selection gesture"
+        )
+        results.check(
+            SelectionMonitor.isSelectionGesture(travelled: 0, clickCount: 2, isShiftHeld: false),
+            "a double-click is a selection gesture"
+        )
+        results.check(
+            SelectionMonitor.isSelectionGesture(travelled: 0, clickCount: 1, isShiftHeld: true),
+            "a shift-click extends a selection"
+        )
+
+        // The toast duration is scaled into UInt64 nanoseconds; nothing may reach that unclamped.
+        let absurd = Toast(severity: .info, message: ShellStrings.copiedToast, action: nil, duration: .infinity)
+        results.check(absurd.resolvedDuration.isFinite, "a non-finite toast duration is rejected")
+        let negative = Toast(severity: .info, message: ShellStrings.copiedToast, action: nil, duration: -5)
+        results.check(negative.resolvedDuration > 0, "a negative toast duration is clamped")
     }
 
     // MARK: - Localization

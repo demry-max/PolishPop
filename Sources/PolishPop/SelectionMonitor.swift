@@ -16,7 +16,7 @@ final class SelectionMonitor {
     var onSelectionCleared: (() -> Void)?
 
     /// Pointer travel, in points, above which a mouse-up is treated as a drag-select.
-    private static let dragThreshold: CGFloat = 4
+    nonisolated private static let dragThreshold: CGFloat = 4
     private static let debounce: UInt64 = 110_000_000
 
     private let accessibility: AccessibilityService
@@ -45,12 +45,14 @@ final class SelectionMonitor {
             let start = mouseDownLocation
             mouseDownLocation = nil
             let end = NSEvent.mouseLocation
-            let travelled = start.map { hypot($0.x - end.x, $0.y - end.y) } ?? .greatestFiniteMagnitude
-            let isDragSelect = travelled > Self.dragThreshold
-            let isMultiClick = event.clickCount >= 2
-            let isShiftExtend = event.modifierFlags.contains(.shift)
-            if isDragSelect || isMultiClick || isShiftExtend {
-                Diagnostics.log("mouseUp: probing (travelled=\(Int(travelled)) clicks=\(event.clickCount) shift=\(isShiftExtend))")
+            let travelled = start.map { hypot($0.x - end.x, $0.y - end.y) }
+
+            if Self.isSelectionGesture(
+                travelled: travelled,
+                clickCount: event.clickCount,
+                isShiftHeld: event.modifierFlags.contains(.shift)
+            ) {
+                Diagnostics.log("mouseUp: probing (travelled=\(Self.describe(travelled)) clicks=\(event.clickCount))")
                 scheduleCapture()
             } else {
                 Diagnostics.log("mouseUp: plain click, clearing")
@@ -129,6 +131,29 @@ final class SelectionMonitor {
         if let lastDelivered, snapshot.matchesLocation(of: lastDelivered) { return }
         lastDelivered = snapshot
         onSelection?(snapshot)
+    }
+
+    /// Whether a mouse-up plausibly created a selection.
+    ///
+    /// - Parameter travelled: distance from the matching mouse-down, or `nil` when that
+    ///   mouse-down was never observed — which happens routinely, because a global monitor
+    ///   receives nothing while PolishPop itself is frontmost. An unknown distance counts as a
+    ///   drag: offering the button needlessly is a smaller sin than hiding it after a real
+    ///   selection.
+    ///
+    /// Pure and static so the decision can be tested directly; the crash this replaced lived in
+    /// an event handler that no test could reach.
+    nonisolated static func isSelectionGesture(travelled: CGFloat?, clickCount: Int, isShiftHeld: Bool) -> Bool {
+        if clickCount >= 2 { return true }
+        if isShiftHeld { return true }
+        guard let travelled else { return true }
+        return travelled > dragThreshold
+    }
+
+    /// Formats a distance for the debug log without ever converting a non-finite value.
+    nonisolated static func describe(_ travelled: CGFloat?) -> String {
+        guard let travelled, travelled.isFinite else { return "unknown" }
+        return String(Int(travelled.rounded()))
     }
 
     private static func isSelectionKeystroke(_ event: NSEvent) -> Bool {

@@ -47,9 +47,12 @@ struct Toast: Identifiable {
     var action: Action?
     var duration: TimeInterval?
 
+    /// Clamped, because this value is later scaled into a `UInt64` of nanoseconds and a negative
+    /// or non-finite duration would trap rather than merely look wrong.
     var resolvedDuration: TimeInterval {
-        if let duration { return duration }
-        return action == nil ? severity.defaultDuration : max(severity.defaultDuration, 7)
+        let requested = duration ?? (action == nil ? severity.defaultDuration : max(severity.defaultDuration, 7))
+        guard requested.isFinite else { return severity.defaultDuration }
+        return min(max(requested, 0.5), 60)
     }
 }
 

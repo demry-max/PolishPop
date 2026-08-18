@@ -25,10 +25,13 @@ enum Diagnostics {
         return directory.appendingPathComponent("debug.log")
     }
 
-    static func log(_ message: String) {
+    /// The message is an autoclosure so that nothing inside it is evaluated when logging is off.
+    /// Building a diagnostic string eagerly means any fault in that string — a bad numeric
+    /// conversion, a force unwrap — reaches users who never asked for diagnostics.
+    static func log(_ message: @autoclosure () -> String) {
         guard isEnabled, let logURL else { return }
         let stamp = ISO8601DateFormatter().string(from: Date())
-        let line = "\(stamp)  \(message)\n"
+        let line = "\(stamp)  \(message())\n"
         queue.async {
             guard let data = line.data(using: .utf8) else { return }
             if let handle = try? FileHandle(forWritingTo: logURL) {
