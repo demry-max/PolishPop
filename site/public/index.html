@@ -166,6 +166,25 @@ ol.steps li::before {
 }
 ol.steps p { margin: 4px 0 0; color: var(--fg-muted); font-size: 15px; }
 
+/* Command block */
+pre.cmd {
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: 10px; padding: 13px 15px; margin: 10px 0 0;
+  overflow-x: auto; font-size: 12.5px; line-height: 1.55;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+pre.cmd code { background: none; padding: 0; font-size: inherit; }
+.route { border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 17px 19px; margin: 0 0 16px; background: var(--bg-raised); }
+.route h3 { display: flex; align-items: baseline; gap: 9px; margin: 0 0 6px; }
+.route .badge {
+  font-size: 11.5px; font-weight: 600; letter-spacing: .02em;
+  padding: 2px 8px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent);
+}
+.route p { margin: 0; color: var(--fg-muted); font-size: 14.5px; }
+.route p + p { margin-top: 8px; }
+
 /* Callout */
 .note {
   background: var(--warn-bg); border: 1px solid var(--warn-border);
@@ -414,34 +433,88 @@ code {
 
   <section>
     <h2><span lang="en">Installing</span><span lang="zh">安装步骤</span></h2>
-    <ol class="steps">
-      <li>
-        <h3><span lang="en">Unzip and move to Applications</span><span lang="zh">解压并移到「应用程序」</span></h3>
-        <p><span lang="en">Keep only one copy. Two copies of the same app confuse macOS about which one holds your Accessibility permission.</span>
-           <span lang="zh">只保留一份。同一个 app 存在两份副本会让 macOS 分不清权限该给谁。</span></p>
-      </li>
-      <li>
-        <h3><span lang="en">Control-click the app, then choose Open</span><span lang="zh">按住 Control 点击 app,选择「打开」</span></h3>
-        <p><span lang="en">Only needed the first time. Double-clicking will be refused, because this build is not notarized by Apple.</span>
-           <span lang="zh">只需第一次这样做。直接双击会被拒绝,因为这个版本没有经过 Apple 公证。</span></p>
-      </li>
-      <li>
-        <h3><span lang="en">Grant Accessibility permission</span><span lang="zh">授予辅助功能权限</span></h3>
-        <p><span lang="en">System Settings → Privacy &amp; Security → Accessibility, then add PolishPop. It detects the change without a restart.</span>
-           <span lang="zh">系统设置 → 隐私与安全性 → 辅助功能,把 PolishPop 加进去。无需重启,它会自动检测到。</span></p>
-      </li>
-      <li>
-        <h3><span lang="en">Sign in with ChatGPT (Codex OAuth)</span><span lang="zh">使用 ChatGPT 登录(Codex OAuth)</span></h3>
-        <p><span lang="en">Open PolishPop's settings and choose <em>Sign in with ChatGPT</em>. Codex's official OAuth page opens in your browser; PolishPop never sees your password or your token. Nothing to pay, nothing to paste.</span>
-           <span lang="zh">打开 PolishPop 设置,点「使用 ChatGPT 登录」。浏览器会打开 Codex 官方 OAuth 授权页,PolishPop 不会接触你的密码或令牌。不用付费,也不用粘贴任何密钥。</span></p>
-      </li>
-    </ol>
+    <p class="lede">
+      <span lang="en">This build is not notarized by Apple, so macOS will not open it until you say so explicitly. Every route below ends with you extending that trust — what differs is how much you can check first.</span>
+      <span lang="zh">这个版本没有经过 Apple 公证,所以 macOS 在你明确表态之前不会打开它。下面每条路径最终都需要你授予这份信任,区别只在于你事先能核实多少。</span>
+    </p>
+
+    <div class="route">
+      <h3>
+        <span lang="en">Terminal</span><span lang="zh">终端安装</span>
+        <span class="badge"><span lang="en">verifiable</span><span lang="zh">可核验</span></span>
+      </h3>
+      <p>
+        <span lang="en">Downloads the archive, checks it against the published SHA-256, and installs it. Files fetched with <code>curl</code> are never marked as quarantined, so macOS shows no block dialog at all. PolishPop already needs the Codex CLI installed through npm, so you have a terminal open anyway.</span>
+        <span lang="zh">下载安装包、比对已公布的 SHA-256、然后安装。用 <code>curl</code> 取回的文件不会被打上隔离标记,所以 macOS 完全不会弹出拦截对话框。反正 PolishPop 本来就要用 npm 装 Codex CLI,终端你已经开着了。</span>
+      </p>
+<pre class="cmd"><code>cd /tmp \
+  &amp;&amp; curl -fsSLO https://polishpop.eric-c85.workers.dev/PolishPop-0.5.0.zip \
+  &amp;&amp; shasum -a 256 -c &lt;&lt;&lt; "28f3d31f951e222b0a1ca7960d735b7c30a862014bcc52e6a335de34cb40fb78  PolishPop-0.5.0.zip" \
+  &amp;&amp; unzip -oq PolishPop-0.5.0.zip -d /Applications \
+  &amp;&amp; open /Applications/PolishPop.app</code></pre>
+      <p>
+        <span lang="en">If the checksum does not match, the chain stops and nothing is installed.</span>
+        <span lang="zh">校验和对不上时,整条命令会中断,不会安装任何东西。</span>
+      </p>
+    </div>
+
+    <div class="route">
+      <h3>
+        <span lang="en">Download button</span><span lang="zh">网页下载</span>
+        <span class="badge"><span lang="en">more steps</span><span lang="zh">步骤较多</span></span>
+      </h3>
+      <p>
+        <span lang="en">A browser marks the download as quarantined, so macOS blocks the first launch with <em>“PolishPop” Not Opened — Apple could not verify “PolishPop” is free of malware…</em>, offering only <strong>Move to Trash</strong> and <strong>Done</strong>. That dialog is expected. Click <strong>Done</strong>, never Move to Trash.</span>
+        <span lang="zh">浏览器会把下载的文件标记为隔离,所以 macOS 会拦下首次启动,提示<em>「PolishPop」未打开 — Apple 无法验证「PolishPop」是否包含恶意软件…</em>,并且只给<strong>「移到废纸篓」</strong>和<strong>「完成」</strong>两个按钮。这个弹窗是预期之内的。请点<strong>「完成」</strong>,不要点移到废纸篓。</span>
+      </p>
+      <ol class="steps" style="margin-top:14px">
+        <li>
+          <h3><span lang="en">Move the app to Applications first</span><span lang="zh">先把 app 移到「应用程序」</span></h3>
+          <p><span lang="en">Drag <code>PolishPop.app</code> itself out of Downloads. Launching it from where it was unzipped makes macOS run it from a randomised read-only copy, which breaks the next steps.</span>
+             <span lang="zh">把 <code>PolishPop.app</code> 本身从「下载」里拖出来。直接在解压位置启动会让 macOS 用一个随机只读副本运行它,后面的步骤就会失效。</span></p>
+        </li>
+        <li>
+          <h3><span lang="en">Double-click it once and let it be blocked</span><span lang="zh">双击一次,让它被拦下</span></h3>
+          <p><span lang="en">macOS only offers an override after it has recorded a blocked launch, and the offer lasts about an hour.</span>
+             <span lang="zh">macOS 只有在记录到一次被拦截的启动之后才会提供放行选项,而且这个选项大约只保留一小时。</span></p>
+        </li>
+        <li>
+          <h3><span lang="en">System Settings → Privacy &amp; Security → Security</span><span lang="zh">系统设置 → 隐私与安全性 → 安全性</span></h3>
+          <p><span lang="en">Scroll to the bottom. If a line reads <em>“PolishPop” was blocked to protect your Mac</em>, click <strong>Open Anyway</strong>, authenticate, and confirm <strong>Open</strong> in the dialog that follows. The app is then a permanent exception.</span>
+             <span lang="zh">滚到最下面。如果看到<em>「PolishPop」已被阻止以保护你的 Mac</em> 这一行,点<strong>「仍然打开」</strong>,通过验证,然后在随后的对话框里确认<strong>「打开」</strong>。此后它就是永久例外了。</span></p>
+        </li>
+      </ol>
+      <div class="note">
+        <p><strong><span lang="en">That line may not appear for this build.</span><span lang="zh">这一行有可能根本不出现。</span></strong></p>
+        <p>
+          <span lang="en">macOS reserves the Open Anyway route for software it can at least identify. An app signed with a self-issued certificate — which this one is — may get only the two-button dialog with no override offered anywhere. If you scroll to Security and find nothing there, use the terminal route above, or the command below.</span>
+          <span lang="zh">macOS 把「仍然打开」这条路径留给它至少能够识别的软件。使用自签发证书签名的 app——本应用正是如此——有可能只会得到那个两按钮弹窗,任何地方都不提供放行入口。如果你滚到「安全性」什么都没看到,请改用上面的终端方式,或下面这条命令。</span>
+        </p>
+<pre class="cmd"><code>xattr -dr com.apple.quarantine /Applications/PolishPop.app</code></pre>
+        <p>
+          <span lang="en">This removes the quarantine mark so the first-launch check never runs. Be clear about what that costs: it skips Gatekeeper's assessment entirely — the signature check, the malware scan and the notarization check — for this app. Verify the download against the SHA-256 above before running it, and do not use this command on software you did not deliberately fetch from a source you trust.</span>
+          <span lang="zh">这会移除隔离标记,使首次启动检查根本不会执行。请清楚它的代价:它对这个 app **完全跳过** Gatekeeper 的评估——签名校验、恶意软件扫描、公证校验全部跳过。运行之前请先用上面的 SHA-256 核对下载文件,也不要把这条命令用在并非你主动从可信来源获取的软件上。</span>
+        </p>
+      </div>
+    </div>
+
+    <div class="route">
+      <h3><span lang="en">Then, once it opens</span><span lang="zh">打开之后</span></h3>
+      <p>
+        <span lang="en"><strong>1.</strong> Grant Accessibility permission — System Settings → Privacy &amp; Security → Accessibility, then add PolishPop. It detects the change without a restart.</span>
+        <span lang="zh"><strong>1.</strong> 授予辅助功能权限 — 系统设置 → 隐私与安全性 → 辅助功能,把 PolishPop 加进去。无需重启,它会自动检测到。</span>
+      </p>
+      <p>
+        <span lang="en"><strong>2.</strong> Open PolishPop's settings and choose <em>Sign in with ChatGPT</em>. Codex's official OAuth page opens in your browser; PolishPop never sees your password or your token. Nothing to pay, nothing to paste.</span>
+        <span lang="zh"><strong>2.</strong> 打开 PolishPop 设置,点「使用 ChatGPT 登录」。浏览器会打开 Codex 官方 OAuth 授权页,PolishPop 不会接触你的密码或令牌。不用付费,也不用粘贴任何密钥。</span>
+      </p>
+    </div>
 
     <div class="note">
-      <p><strong><span lang="en">This build is signed, but not notarized.</span><span lang="zh">这个版本已签名,但未经 Apple 公证。</span></strong></p>
+      <p><strong><span lang="en">Why any of this is necessary</span><span lang="zh">为什么要这么麻烦</span></strong></p>
       <p>
-        <span lang="en">It is signed with a self-issued certificate so that your Accessibility permission survives updates, but Apple has not notarized it, so Gatekeeper will call the developer unidentified on first launch. Control-click → Open once and macOS remembers.</span>
-        <span lang="zh">它使用自签发证书签名,好让辅助功能授权在更新后依然有效;但 Apple 没有对它公证,所以首次启动时 Gatekeeper 会提示开发者身份不明。按住 Control 点击 → 打开,一次之后 macOS 就会记住。</span>
+        <span lang="en">Apple notarizes software only for members of its Developer Program. PolishPop is signed — with a certificate issued on the developer's own machine, which keeps your Accessibility permission working across updates — but it has never been submitted to Apple, so Gatekeeper cannot vouch for it and says so. Notarization is the only thing that removes these steps, and it is on the roadmap rather than done.</span>
+        <span lang="zh">Apple 只为其开发者计划的成员提供公证服务。PolishPop 是有签名的——使用开发者本机签发的证书,好让你的辅助功能授权在版本更新后依然有效——但它从未提交给 Apple,所以 Gatekeeper 无法为它背书,也就如实提示。只有公证能免掉上述步骤,而那还在计划中,尚未完成。</span>
       </p>
     </div>
   </section>

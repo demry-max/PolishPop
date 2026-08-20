@@ -97,7 +97,25 @@ number and checksum in `site/public/index.html` to match.
 
 1. Unzip `PolishPop-0.5.0.zip`.
 2. Move `PolishPop.app` to `/Applications`.
-3. Open it. Because this personal MVP is ad-hoc signed rather than notarized, macOS may require Control-click → **Open** the first time.
+3. Open it. This build is signed with a self-issued certificate but is **not notarized**, so macOS
+   blocks the first launch with *"PolishPop" Not Opened* and offers only **Move to Trash** and
+   **Done**. Click Done.
+
+   Control-click → Open no longer works: Apple removed that override in macOS 15 Sequoia
+   (<https://developer.apple.com/news/?id=saqachfa>). The documented replacement is to attempt the
+   launch, then go to System Settings → Privacy & Security → Security and click **Open Anyway**
+   within about an hour. macOS may not offer that row for a self-signed app at all, in which case
+   remove the quarantine mark yourself:
+
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/PolishPop.app
+   ```
+
+   That skips Gatekeeper's whole first-launch assessment for this app, so verify the archive
+   against its published SHA-256 first. Installing with `curl` avoids the situation entirely,
+   because curl does not mark its downloads as quarantined — note that `unzip` *does* propagate
+   quarantine from an already-quarantined archive, so it is the download tool that matters, not the
+   unzip step.
 4. Click **Sign in with ChatGPT** and complete the OpenAI browser authorization.
 5. Grant Accessibility permission when prompted.
 

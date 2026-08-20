@@ -37,6 +37,14 @@ swift build --disable-sandbox --sdk "$SDK_PATH" -c release --package-path "$PROJ
 # macOS discards the app's Accessibility permission each time. Signing with a certificate makes the
 # requirement `identifier ... and certificate leaf = H"..."`, which survives rebuilds — the user
 # grants Accessibility once instead of after every packaging run.
+#
+# This self-issued certificate is for LOCAL DEVELOPMENT ONLY. It does nothing for Gatekeeper: a
+# copy downloaded through a browser is still blocked on first launch, because Gatekeeper wants a
+# notarization ticket rather than merely a signature. Apple's notary service also rejects
+# self-signed certificates outright, so shipping properly means replacing this identity with a
+# Developer ID Application certificate, adding --options runtime --timestamp, and submitting to
+# `xcrun notarytool` then `xcrun stapler staple`. Run `syspolicy_check distribution "$APP_PATH"`
+# to see what Apple thinks is missing.
 SIGN_IDENTITY="PolishPop Self-Signed"
 if /usr/bin/security find-certificate -c "$SIGN_IDENTITY" >/dev/null 2>&1; then
     /usr/bin/codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_PATH"
