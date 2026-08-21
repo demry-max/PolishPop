@@ -169,12 +169,56 @@ The icon is original PolishPop artwork and intentionally contains no Apple, Open
 
 ## Mac App Store status
 
-Version 0.5.0 is **not ready for Mac App Store submission**. It remains a direct-download MVP for two architectural reasons:
+Version 0.5.0 **cannot** be submitted to the Mac App Store, and no amount of configuration changes
+that. App Sandbox is mandatory there — Guideline 2.4.5(i), verbatim: "They must be appropriately
+sandboxed" — and two of this app's mechanics are impossible inside a sandbox.
 
-1. Apple requires Mac App Store apps to enable App Sandbox, while Apple documents the use of Accessibility APIs in assistive apps as incompatible with App Sandbox: <https://developer.apple.com/documentation/security/protecting-user-data-with-app-sandbox>
-2. Mac App Store apps must be self-contained. This MVP depends on a separately installed, OpenAI-signed Codex CLI. Apple’s review guidelines require apps to be appropriately sandboxed, packaged through Xcode, and submitted as a single self-contained bundle: <https://developer.apple.com/app-store/review/guidelines/>
+Both blockers were confirmed by A/B experiment on macOS 26.5.2: one binary, two bundles differing
+only by `com.apple.security.app-sandbox`.
 
-An App Store edition therefore needs a different interaction model, such as an `NSServices`/Share-extension workflow where the host app explicitly hands selected text to PolishPop, plus a bundled and licensed inference/OAuth component. That edition would not be able to display the current universal floating button through Accessibility.
+1. **Reading and writing another app's selected text.** Sandboxed *and* granted Accessibility
+   trust, every cross-process `AXUIElementCopyAttributeValue` returned `kAXErrorCannotComplete`
+   (−25204); the unsandboxed control returned 0 against the same apps. The sandboxed build fails
+   with a *different* error than an untrusted build (−25211 `kAXErrorAPIDisabled`), i.e. it is
+   refused at the sandbox layer before the TCC gate, so granting permission cannot help. Apple's
+   own list of activities "forbidden by the operating system when an app runs in a sandbox"
+   includes "Use of accessibility APIs in assistive apps":
+   <https://developer.apple.com/documentation/security/protecting-user-data-with-app-sandbox>
+   There is no entitlement for it — neither the 30 App Sandbox keys nor the 11 temporary-exception
+   keys contain anything for the Accessibility API — and the temporary-exception mechanism now
+   directs developers to file feature requests instead.
+
+2. **Running the separately installed Codex CLI.** A sandboxed bundle could not read or execute
+   `/opt/homebrew/bin/codex` (`NSCocoaErrorDomain` Code=4); the unsandboxed control ran it fine.
+   Guideline 2.5.2 is explicit without needing any inference: apps "may not download, install, or
+   execute code which introduces or changes features or functionality of the app, including other
+   apps." Embedding the CLI does not rescue it either: Apple's helper-tool workflow re-signs
+   embedded executables with the submitting team's identity, which would invalidate the OpenAI
+   signature check in `CodexAppServerClient.verifyCodexExecutable`.
+
+What is **not** a blocker, contrary to the obvious guess:
+
+- Global `NSEvent` mouse monitoring works sandboxed, untrusted (measured: 77 events in six seconds
+  versus 128 for the control).
+- Global key monitoring works sandboxed once Accessibility trust is granted.
+- Posting synthetic `CGEvent` keystrokes works sandboxed with that same trust.
+- Carbon `RegisterEventHotKey` returns `noErr` sandboxed.
+- The business model is fine. Guideline 3.1.1 obliges in-app purchase only for unlocking features
+  for money, and this app sells nothing; a free client for the user's own third-party paid account
+  has shipping precedent on the Mac App Store.
+
+So an App Store edition would have to be a **different, reduced product**: text handed over
+explicitly through `NSServices` (verified to work inside the sandbox) rather than lifted out of the
+frontmost app, and the model called directly over HTTPS under
+`com.apple.security.network.client` rather than through an external CLI. That second change also
+ends the property this app is built around — that it runs on the Codex allowance of the user's own
+ChatGPT plan and never holds a key — because the developer would then own the API relationship and
+the bill.
+
+The realistic path for *this* product is Developer ID plus notarization, which is also what
+OpenAI's own ChatGPT Mac app does for the same reason. Note the current packaging is not yet
+notarization-ready: `scripts/package_app.sh` signs with neither `--options runtime` nor a secure
+timestamp, and the self-issued certificate is rejected by the notary service outright.
 
 ## Stable code signing
 
