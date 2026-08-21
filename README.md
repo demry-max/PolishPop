@@ -264,6 +264,25 @@ self-signed certificate is untrusted for *verification*. That does not prevent *
 designated requirement it produces is what PolishPop needs. This is not a substitute for a Developer
 ID certificate and notarization; Gatekeeper still treats the app as unidentified.
 
+## Install from source
+
+```sh
+git clone https://github.com/demry-max/PolishPop.git
+cd PolishPop
+./scripts/install.sh
+```
+
+This builds the release binary, runs the checks that work without an account, assembles and signs
+the bundle, and installs it to `/Applications`. Set `POLISHPOP_DEST` to install somewhere else.
+
+It is worth preferring over the download for one concrete reason: macOS applies the quarantine flag
+to files a browser downloaded, not to software you compiled yourself, so an app installed this way
+never produces the *"PolishPop" Not Opened — Apple could not verify…* dialog and needs none of the
+System Settings ceremony described above.
+
+Do not use `scripts/package_app.sh` for this. That one is the release script and runs live Codex
+smoke tests, which need an account that is already signed in — impossible before the app exists.
+
 ## Build from source
 
 ```sh
