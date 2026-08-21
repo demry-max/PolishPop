@@ -125,6 +125,37 @@ header .spacer { flex: 1; }
 }
 .cta .meta code { font-size: 12px; word-break: break-all; }
 
+.install {
+  max-width: 790px; margin: 0 auto; text-align: left;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-raised); padding: 14px 16px 4px;
+  box-shadow: var(--shadow);
+}
+.install-head {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 13px; font-weight: 600; color: var(--fg-muted); margin-bottom: 2px;
+}
+.install-head .copy { margin-left: auto; }
+.copy {
+  appearance: none; border: 1px solid var(--border); background: var(--bg);
+  color: var(--fg-muted); border-radius: 7px; padding: 3px 11px;
+  font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.copy:hover { color: var(--fg); }
+.copy[data-copied="1"] { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.copy[data-copied="1"] [lang]::after { content: " ✓"; }
+.copy[data-copied="2"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.copy[data-copied="2"] [lang="en"]::after { content: " — press ⌘C"; }
+.copy[data-copied="2"] [lang="zh"]::after { content: " — 按 ⌘C"; }
+.install pre.cmd {
+  border: 0; background: transparent; padding: 8px 0 0; margin: 0;
+  font-size: 11.5px; overflow-x: visible;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.install-why { font-size: 12.5px; color: var(--fg-faint); margin: 6px 0 12px; line-height: 1.55; }
+.alt { margin: 16px 0 0; font-size: 14.5px; }
+.alt .sep { color: var(--fg-faint); margin: 0 9px; }
+
 /* Sections */
 section { padding: 42px 0; border-top: 1px solid var(--border); }
 section:first-of-type { border-top: 0; }
@@ -241,11 +272,30 @@ code {
     </p>
 
     <div class="cta">
-      <a class="btn" href="/PolishPop-0.5.0.zip" download>
-        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1a.75.75 0 0 1 .75.75v7.19l2.22-2.22a.75.75 0 1 1 1.06 1.06l-3.5 3.5a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 0 1 1.06-1.06l2.22 2.22V1.75A.75.75 0 0 1 8 1ZM2.75 12.5a.75.75 0 0 1 .75.75v.25h9v-.25a.75.75 0 0 1 1.5 0v.5A1.25 1.25 0 0 1 12.75 15h-9.5A1.25 1.25 0 0 1 2 13.75v-.5a.75.75 0 0 1 .75-.75Z"/></svg>
-        <span lang="en">Download for macOS</span>
-        <span lang="zh">下载 macOS 版</span>
-      </a>
+      <div class="install">
+        <div class="install-head">
+          <span lang="en">Paste this into Terminal</span>
+          <span lang="zh">把这行粘进终端</span>
+          <button type="button" class="copy" data-copy="#install-cmd">
+            <span lang="en">Copy</span><span lang="zh">拷贝</span>
+          </button>
+        </div>
+<pre class="cmd" id="install-cmd"><code>cd /tmp \
+  &amp;&amp; curl -fsSLO https://polishpop.eric-c85.workers.dev/PolishPop-0.5.0.zip \
+  &amp;&amp; shasum -a 256 -c &lt;&lt;&lt; "5066409faa20a603fe899b3b6ca32ddb723e39c87b8d3616e4826b8f7f1fd23f  PolishPop-0.5.0.zip" \
+  &amp;&amp; unzip -oq PolishPop-0.5.0.zip -d /Applications \
+  &amp;&amp; open /Applications/PolishPop.app</code></pre>
+        <p class="install-why">
+          <span lang="en">Verifies the archive against its checksum, then installs. macOS does not quarantine what <code>curl</code> fetched, so nothing is blocked and there is no Gatekeeper detour.</span>
+          <span lang="zh">先用校验和核对安装包,再安装。<code>curl</code> 取回的文件不会被 macOS 打隔离标记,所以不会被拦,也不用去系统设置绕一圈。</span>
+        </p>
+      </div>
+
+      <p class="alt">
+        <a href="#source"><span lang="en">Build from source instead</span><span lang="zh">改为从源码构建</span></a>
+        <span class="sep">·</span>
+        <a href="/PolishPop-0.5.0.zip" download><span lang="en">Download the .zip</span><span lang="zh">直接下载 .zip</span></a>
+      </p>
       <p class="meta">
         <span lang="en">Version 0.5.0 · 1.9 MB · Apple Silicon · macOS 13 or later</span>
         <span lang="zh">版本 0.5.0 · 1.9 MB · Apple 芯片 · macOS 13 或更高</span>
@@ -263,9 +313,6 @@ code {
           <span lang="en">Open source</span>
           <span lang="zh">源码公开</span>
         </a>
-      </p>
-      <p class="meta">
-        SHA-256 <code>5066409faa20a603fe899b3b6ca32ddb723e39c87b8d3616e4826b8f7f1fd23f</code>
       </p>
     </div>
   </div>
@@ -443,7 +490,7 @@ code {
       <span lang="zh">这个版本没有经过 Apple 公证,所以 macOS 在你明确表态之前不会打开它。下面每条路径最终都需要你授予这份信任,区别只在于你事先能核实多少。</span>
     </p>
 
-    <div class="route">
+    <div class="route" id="source">
       <h3>
         <span lang="en">Build from source</span><span lang="zh">从源码安装</span>
         <span class="badge"><span lang="en">no Gatekeeper prompt</span><span lang="zh">无系统拦截</span></span>
@@ -613,6 +660,41 @@ cd PolishPop
 
   buttons.forEach(function (b) {
     b.addEventListener('click', function () { apply(b.dataset.setLang, true); });
+  });
+
+  document.querySelectorAll('.copy').forEach(function (button) {
+    var labels = button.querySelectorAll('[lang]');
+
+    function flash(state) {
+      button.dataset.copied = state;
+      setTimeout(function () { delete button.dataset.copied; }, 1800);
+    }
+
+    // If the clipboard is refused — no permission, no user gesture, an old browser — select the
+    // command instead, so the reader is one Command-C away rather than stuck with a dead button.
+    function selectInstead(source) {
+      var range = document.createRange();
+      range.selectNodeContents(source);
+      var selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      flash('2');
+    }
+
+    button.addEventListener('click', function () {
+      var source = document.querySelector(button.dataset.copy);
+      if (!source) return;
+      var text = source.innerText.trim();
+      if (!navigator.clipboard || !navigator.clipboard.writeText) {
+        selectInstead(source);
+        return;
+      }
+      navigator.clipboard.writeText(text).then(
+        function () { flash('1'); },
+        function () { selectInstead(source); }
+      );
+    });
+    void labels;
   });
 })();
 </script>
