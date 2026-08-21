@@ -113,6 +113,7 @@ header .spacer { flex: 1; }
 .btn svg { width: 18px; height: 18px; }
 .cta .meta { margin-top: 12px; font-size: 13.5px; color: var(--fg-faint); }
 .pills { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 18px 0 0; }
+.pill { text-decoration: none; }
 .pill {
   border: 1px solid var(--border); background: var(--bg-raised); color: var(--fg-muted);
   border-radius: 999px; padding: 5px 14px; font-size: 13.5px; font-weight: 500;
@@ -258,6 +259,10 @@ code {
           <span lang="en">Sign in with ChatGPT via Codex OAuth</span>
           <span lang="zh">通过 Codex OAuth 用 ChatGPT 登录</span>
         </span>
+        <a class="pill" href="https://github.com/demry-max/PolishPop">
+          <span lang="en">Open source</span>
+          <span lang="zh">源码公开</span>
+        </a>
       </p>
       <p class="meta">
         SHA-256 <code>5066409faa20a603fe899b3b6ca32ddb723e39c87b8d3616e4826b8f7f1fd23f</code>
@@ -437,6 +442,24 @@ code {
       <span lang="en">This build is not notarized by Apple, so macOS will not open it until you say so explicitly. Every route below ends with you extending that trust — what differs is how much you can check first.</span>
       <span lang="zh">这个版本没有经过 Apple 公证,所以 macOS 在你明确表态之前不会打开它。下面每条路径最终都需要你授予这份信任,区别只在于你事先能核实多少。</span>
     </p>
+
+    <div class="route">
+      <h3>
+        <span lang="en">Build from source</span><span lang="zh">从源码安装</span>
+        <span class="badge"><span lang="en">no Gatekeeper prompt</span><span lang="zh">无系统拦截</span></span>
+      </h3>
+      <p>
+        <span lang="en">macOS quarantines what a browser downloaded, not what you compiled yourself. Building locally is therefore the only route with no block dialog and no System Settings detour at all — and you can read exactly what the app does with your text before running it.</span>
+        <span lang="zh">macOS 只对浏览器下载的文件打隔离标记,对你自己编译的东西不打。所以本地构建是唯一完全不会出现拦截弹窗、也不需要去系统设置绕一圈的方式——而且你可以在运行之前,自己读一遍它到底怎么处理你的文字。</span>
+      </p>
+<pre class="cmd"><code>git clone https://github.com/demry-max/PolishPop.git
+cd PolishPop
+./scripts/install.sh</code></pre>
+      <p>
+        <span lang="en">Needs the Swift toolchain — Xcode, or just <code>xcode-select --install</code>. The build takes about half a minute. Source: <a href="https://github.com/demry-max/PolishPop">github.com/demry-max/PolishPop</a></span>
+        <span lang="zh">需要 Swift 工具链——装了 Xcode,或者只跑 <code>xcode-select --install</code> 即可。构建约半分钟。源码:<a href="https://github.com/demry-max/PolishPop">github.com/demry-max/PolishPop</a></span>
+      </p>
+    </div>
 
     <div class="route">
       <h3>
