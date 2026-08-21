@@ -14,6 +14,10 @@ enum ErrorStrings {
         "Select some text first.",
         "请先选中一段文字。"
     )
+    static let selectionUnavailable = LocalizedText(
+        "This app does not share its selected text with macOS, so PolishPop cannot read it. Copy the text into another field and polish it there.",
+        "这个应用不通过 macOS 辅助功能接口提供选中的文字,PolishPop 读不到。可以先把文字复制到别处再润色。"
+    )
     static let protectedTextField = LocalizedText(
         "PolishPop never reads passwords or other protected text fields.",
         "PolishPop 不会读取密码等受保护的输入框。"

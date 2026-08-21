@@ -21,8 +21,23 @@ enum AXReader {
     enum ReadError: Error, Equatable {
         case noFocusedElement
         case noSelection
+        /// The focused element exists but refuses to hand over its selection. Distinct from
+        /// `noSelection`, which means the field answered and had nothing selected — telling
+        /// somebody to "select some text first" when they demonstrably just did is worse than
+        /// saying nothing.
+        case selectionUnavailable
         case protectedField
         case tooLong
+    }
+
+    /// What asking an element for its selected text actually produced.
+    enum SelectedTextOutcome: Equatable {
+        /// The element answered. An empty string means there is genuinely no selection.
+        case value(String)
+        /// The element cannot or will not report a selection — typical of canvas-drawn web
+        /// editors, Electron apps and custom text controls that implement no Accessibility text
+        /// interface at all.
+        case unavailable(AXError)
     }
 
     static func focusedElement(timeout: Float) -> AXElementBox? {
@@ -63,8 +78,14 @@ enum AXReader {
             throw ReadError.protectedField
         }
 
-        guard let text = selectedText(in: element), !text.isEmpty else {
-            throw ReadError.noSelection
+        let text: String
+        switch readSelectedText(in: element) {
+        case .value(let value):
+            guard !value.isEmpty else { throw ReadError.noSelection }
+            text = value
+        case .unavailable(let status):
+            Diagnostics.log("selection unavailable: AXError \(status.rawValue)")
+            throw ReadError.selectionUnavailable
         }
         guard text.count <= maximumLength else {
             throw ReadError.tooLong
@@ -93,14 +114,34 @@ enum AXReader {
     }
 
     static func selectedText(in element: AXUIElement) -> String? {
+        guard case .value(let text) = readSelectedText(in: element) else { return nil }
+        return text
+    }
+
+    static func readSelectedText(in element: AXUIElement) -> SelectedTextOutcome {
         var selectedValue: CFTypeRef?
         let status = AXUIElementCopyAttributeValue(
             element,
             kAXSelectedTextAttribute as CFString,
             &selectedValue
         )
-        guard status == .success else { return nil }
-        return selectedValue as? String
+        return classifySelectedText(status: status, text: selectedValue as? String)
+    }
+
+    /// Split out from the Accessibility call so the classification can be tested directly.
+    ///
+    /// `noValue` is deliberately treated as an empty selection rather than as a failure: the
+    /// attribute exists, the field simply has nothing selected right now.
+    nonisolated static func classifySelectedText(status: AXError, text: String?) -> SelectedTextOutcome {
+        switch status {
+        case .success:
+            guard let text else { return .unavailable(.attributeUnsupported) }
+            return .value(text)
+        case .noValue:
+            return .value("")
+        default:
+            return .unavailable(status)
+        }
     }
 
     static func selectedRange(in element: AXUIElement) -> CFRange? {

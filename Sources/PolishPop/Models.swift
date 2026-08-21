@@ -156,6 +156,7 @@ enum FloatingPhase: Equatable {
 enum PolishPopError: LocalizedError, Equatable {
     case accessibilityPermissionMissing
     case noSelection
+    case selectionUnavailable
     case protectedTextField
     case selectionChanged
     case selectionTooLong(limit: Int)
@@ -165,6 +166,7 @@ enum PolishPopError: LocalizedError, Equatable {
         switch self {
         case .accessibilityPermissionMissing: ErrorStrings.accessibilityPermissionMissing
         case .noSelection: ErrorStrings.noSelection
+        case .selectionUnavailable: ErrorStrings.selectionUnavailable
         case .protectedTextField: ErrorStrings.protectedTextField
         case .selectionChanged: ErrorStrings.selectionChanged
         case .selectionTooLong(let limit): ErrorStrings.selectionTooLong(limit: limit)

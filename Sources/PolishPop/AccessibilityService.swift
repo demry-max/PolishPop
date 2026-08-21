@@ -78,6 +78,8 @@ final class AccessibilityService {
             throw PolishPopError.protectedTextField
         case .failure(.tooLong):
             throw PolishPopError.selectionTooLong(limit: Self.maximumSelectionLength)
+        case .failure(.selectionUnavailable):
+            throw PolishPopError.selectionUnavailable
         case .failure:
             throw PolishPopError.noSelection
         }

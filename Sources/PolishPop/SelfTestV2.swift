@@ -23,6 +23,7 @@ enum SelfTest {
         checkShortcuts(&results)
         checkLocalization(&results)
         checkSelectionGestures(&results)
+        checkSelectionClassification(&results)
 
         if results.failures.isEmpty {
             print("PolishPop self-test: \(results.total) checks passed")
@@ -218,6 +219,45 @@ enum SelfTest {
         results.check(negative.resolvedDuration > 0, "a negative toast duration is clamped")
     }
 
+    // MARK: - Selection readability
+
+    /// Telling somebody to "select some text first" when they just did is the failure this pins.
+    /// An app that exposes no Accessibility text interface must be reported as such, and an app
+    /// that answers with an empty selection must not be.
+    private static func checkSelectionClassification(_ results: inout Results) {
+        results.check(
+            AXReader.classifySelectedText(status: .success, text: "hello") == .value("hello"),
+            "a readable selection is returned as a value"
+        )
+        results.check(
+            AXReader.classifySelectedText(status: .success, text: "") == .value(""),
+            "an empty selection stays an empty selection, not a failure"
+        )
+        results.check(
+            AXReader.classifySelectedText(status: .noValue, text: nil) == .value(""),
+            "noValue means nothing is selected rather than nothing is supported"
+        )
+        results.check(
+            AXReader.classifySelectedText(status: .attributeUnsupported, text: nil)
+                == .unavailable(.attributeUnsupported),
+            "an element with no selected-text attribute reports unavailable"
+        )
+        results.check(
+            AXReader.classifySelectedText(status: .cannotComplete, text: nil)
+                == .unavailable(.cannotComplete),
+            "an unresponsive element reports unavailable"
+        )
+        results.check(
+            AXReader.classifySelectedText(status: .success, text: nil)
+                == .unavailable(.attributeUnsupported),
+            "a non-string answer counts as unavailable"
+        )
+        results.check(
+            PolishPopError.selectionUnavailable.message != PolishPopError.noSelection.message,
+            "the two failures say different things to the user"
+        )
+    }
+
     // MARK: - Localization
 
     /// Guards against a half-translated build: every string must differ between languages unless
@@ -235,6 +275,7 @@ enum SelfTest {
             ("privacyNotice", SettingsStrings.privacyNotice),
             ("quickModeWarning", SettingsStrings.quickModeWarning),
             ("noSelection", ErrorStrings.noSelection),
+            ("selectionUnavailable", ErrorStrings.selectionUnavailable),
             ("cliNotFound", ErrorStrings.cliNotFound)
         ]
         for tone in PolishTone.allCases {
