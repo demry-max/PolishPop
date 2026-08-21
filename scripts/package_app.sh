@@ -22,6 +22,7 @@ swift build --disable-sandbox --sdk "$SDK_PATH" -c release --package-path "$PROJ
 
 "$PROJECT_ROOT/.build/release/PolishPop" --self-test
 "$PROJECT_ROOT/.build/release/PolishPop" --render-ui "${OUTPUT_DIR}/ui-render"
+"$PROJECT_ROOT/.build/release/PolishPop" --activation-probe
 "$PROJECT_ROOT/.build/release/PolishPop" --codex-smoke-test
 "$PROJECT_ROOT/.build/release/PolishPop" --polish-smoke-test
 

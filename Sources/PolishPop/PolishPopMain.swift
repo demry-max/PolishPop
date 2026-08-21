@@ -74,6 +74,16 @@ enum PolishPopMain {
             exit(trusted ? EXIT_SUCCESS : EXIT_FAILURE)
         }
 
+        if CommandLine.arguments.contains("--activation-probe") {
+            let application = NSApplication.shared
+            application.setActivationPolicy(.regular)
+            let report = MainActor.assumeIsolated { UIRenderer.probeActivation() }
+            for line in report.lines {
+                print(line)
+            }
+            exit(report.passed ? EXIT_SUCCESS : EXIT_FAILURE)
+        }
+
         if CommandLine.arguments.contains("--window-probe") {
             let application = NSApplication.shared
             application.setActivationPolicy(.accessory)

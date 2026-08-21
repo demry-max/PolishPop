@@ -98,7 +98,12 @@ final class ReviewWindowController: NSObject, NSWindowDelegate {
         window.minSize = NSSize(width: 560, height: 380)
         window.isReleasedWhenClosed = false
         window.isFloatingPanel = true
-        window.becomesKeyOnlyIfNeeded = false
+        // Key status is granted on demand rather than seized on show. Forcing it activates the
+        // whole application, and activating PolishPop makes macOS jump to whichever Space its
+        // ordinary windows live on — the panel appeared to "run off to another desktop", dragging
+        // the user with it. Clicking anywhere in a non-activating panel still makes it key, and
+        // does so without activating the app.
+        window.becomesKeyOnlyIfNeeded = true
         window.level = .floating
         window.hidesOnDeactivate = false
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
@@ -151,8 +156,7 @@ final class ReviewWindowController: NSObject, NSWindowDelegate {
 
         resizeForContent(original)
         position(near: anchor)
-        window.orderFrontRegardless()
-        window.makeKey()
+        presentWithoutActivating()
         return sessionID
     }
 
@@ -165,8 +169,7 @@ final class ReviewWindowController: NSObject, NSWindowDelegate {
         model.generatedPurpose = purpose
         model.phase = .ready
         model.status = ReviewStrings.reviewFirst
-        window.orderFrontRegardless()
-        window.makeKey()
+        presentWithoutActivating()
     }
 
     func updateDraft(_ draft: String, session: UUID) {
@@ -195,6 +198,22 @@ final class ReviewWindowController: NSObject, NSWindowDelegate {
     /// The draft as the user has it right now, including any hand edits.
     var currentDraft: String { model.draft }
 
+    /// Brings the panel forward without making PolishPop the active application.
+    ///
+    /// The panel already joins every Space, so it shows up wherever the user is; what used to
+    /// relocate them was the activation, not the window.
+    private func presentWithoutActivating() {
+        window.orderFrontRegardless()
+        // When PolishPop is already the active application there is nothing to steal and no Space
+        // to be thrown to, so the panel may as well arrive ready for the keyboard.
+        if NSApplication.shared.isActive {
+            window.makeKey()
+        }
+    }
+
+    /// True when the panel currently owns the keyboard. Used by `--activation-probe`.
+    var isKeyForDiagnostics: Bool { window.isKeyWindow }
+
     /// Only the session that opened the panel may close it; an apply that finishes after the user
     /// has started a new polish must not dismiss the new draft.
     func closeAfterSuccess(session: UUID) {
@@ -208,7 +227,10 @@ final class ReviewWindowController: NSObject, NSWindowDelegate {
         window.performClose(nil)
     }
 
+
     var isVisible: Bool { window.isVisible }
+
+
 
     func windowWillClose(_ notification: Notification) {
         guard !suppressCloseCallback else { return }

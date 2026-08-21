@@ -344,6 +344,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.setContentSize(NSSize(width: 600, height: 680))
         window.contentMinSize = NSSize(width: 560, height: 460)
         window.isReleasedWhenClosed = false
+        // Follow the user instead of anchoring the app to the Space it was first opened on.
+        // An ordinary window sitting on another desktop is what gives macOS somewhere to jump to
+        // whenever PolishPop is activated.
+        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         window.delegate = self
         window.center()
     }

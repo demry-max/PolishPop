@@ -152,7 +152,75 @@ enum UIRenderer {
         return NSApplication.shared.windows.map { window in
             let size = window.frame.size
             let content = window.contentLayoutRect.size
-            return "\(window.title.isEmpty ? "(untitled)" : window.title): frame \(Int(size.width))x\(Int(size.height)) content \(Int(content.width))x\(Int(content.height))"
+            var behaviour: [String] = []
+            let b = window.collectionBehavior
+            if b.contains(.canJoinAllSpaces) { behaviour.append("canJoinAllSpaces") }
+            if b.contains(.moveToActiveSpace) { behaviour.append("moveToActiveSpace") }
+            if b.contains(.stationary) { behaviour.append("stationary") }
+            if b.contains(.transient) { behaviour.append("transient") }
+            if b.contains(.fullScreenAuxiliary) { behaviour.append("fullScreenAuxiliary") }
+            if b.contains(.fullScreenPrimary) { behaviour.append("fullScreenPrimary") }
+            if b.isEmpty { behaviour.append("(none)") }
+            let title = window.title.isEmpty ? "(untitled)" : window.title
+            return """
+            \(title)
+                frame       \(Int(size.width))x\(Int(size.height))  content \(Int(content.width))x\(Int(content.height))
+                level       \(window.level.rawValue)
+                behaviour   \(behaviour.joined(separator: " | "))
+                floating    isFloatingPanel=\((window as? NSPanel)?.isFloatingPanel ?? false)  hidesOnDeactivate=\(window.hidesOnDeactivate)
+            """
+        }
+    }
+
+    /// Checks that showing the review panel does not activate PolishPop.
+    ///
+    /// This is a regression guard, not a curiosity. Activating the app makes macOS switch to
+    /// whichever Space holds its ordinary windows, which the user experiences as the review panel
+    /// hurling them onto a different desktop mid-edit. The panel joins every Space, so it is the
+    /// activation and not the window placement that has to stay suppressed.
+    ///
+    /// - Returns: the report lines, and whether the check passed.
+    static func probeActivation() -> (lines: [String], passed: Bool) {
+        var lines: [String] = []
+        let activeAtStart = NSApplication.shared.isActive
+        lines.append("app active at start:              \(activeAtStart)")
+
+        let review = ReviewWindowController()
+        _ = review.showGenerating(
+            original: UISamples.originalText,
+            tone: .professional,
+            purpose: .email,
+            targetApplicationName: "Mail",
+            canReplace: true,
+            near: NSPoint(x: 600, y: 500)
+        )
+        settle()
+        let activeAfterPanel = NSApplication.shared.isActive
+        lines.append("app active after review panel:    \(activeAfterPanel)   <- must stay false")
+        lines.append("panel key (expected false):       \(review.isKeyForDiagnostics)")
+
+        let settings = SettingsWindowController(
+            client: CodexAppServerClient(),
+            accessibility: AccessibilityService()
+        )
+        settle()
+        var settingsBehaviour: [String] = []
+        for window in NSApplication.shared.windows where window.title.contains("Settings") {
+            if window.collectionBehavior.contains(.moveToActiveSpace) { settingsBehaviour.append("moveToActiveSpace") }
+            if window.collectionBehavior.contains(.canJoinAllSpaces) { settingsBehaviour.append("canJoinAllSpaces") }
+        }
+        _ = settings
+        let settingsFollows = !settingsBehaviour.isEmpty
+        lines.append("settings window follows Spaces:   \(settingsFollows) \(settingsBehaviour.joined(separator: ","))   <- must be true")
+
+        let passed = !activeAfterPanel && settingsFollows
+        lines.append(passed ? "PASS" : "FAIL")
+        return (lines, passed)
+    }
+
+    private static func settle() {
+        for _ in 0..<30 {
+            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01))
         }
     }
 
